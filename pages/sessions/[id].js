@@ -1,8 +1,4 @@
-import dynamic from "next/dynamic";
-
-const SessionDetail = dynamic(() => import("../../components/SessionDetail"), {
-  ssr: false,
-});
+import SessionDetail from "../../components/SessionDetail";
 
 export default function SessionDetailPage() {
   return <SessionDetail />;

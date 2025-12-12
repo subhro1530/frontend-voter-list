@@ -18,11 +18,11 @@ export default function VoterTable({ voters = [], loading, error }) {
   return (
     <div className="card space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm text-slate-700">
+        <div className="text-sm text-slate-200">
           Showing {paged.length} of {voters.length} voters
         </div>
         <div className="flex items-center gap-2 text-sm">
-          <label htmlFor="pageSize" className="text-slate-600">
+          <label htmlFor="pageSize" className="text-slate-300">
             Page size
           </label>
           <select
@@ -45,13 +45,13 @@ export default function VoterTable({ voters = [], loading, error }) {
       </div>
 
       {error && (
-        <div className="p-3 bg-rose-50 text-rose-800 rounded-lg border border-rose-200">
+        <div className="p-3 bg-rose-900/40 text-rose-100 rounded-lg border border-rose-700">
           {error}
         </div>
       )}
-      {loading && <div className="p-3 text-slate-600">Loading voters…</div>}
+      {loading && <div className="p-3 text-slate-300">Loading voters…</div>}
       {!loading && !error && voters.length === 0 && (
-        <div className="p-3 text-slate-600">
+        <div className="p-3 text-slate-300">
           No voters found for these filters.
         </div>
       )}
@@ -60,7 +60,7 @@ export default function VoterTable({ voters = [], loading, error }) {
         <div className="table-scroll">
           <table className="w-full text-sm sticky-header">
             <thead className="text-left">
-              <tr className="text-slate-600">
+              <tr className="text-slate-200">
                 <th className="p-2">Name</th>
                 <th className="p-2">Voter ID</th>
                 <th className="p-2">Gender</th>
@@ -77,32 +77,32 @@ export default function VoterTable({ voters = [], loading, error }) {
               {paged.map((voter) => (
                 <tr
                   key={`${voter.voter_id}-${voter.serial_number}`}
-                  className="border-b border-sand-100 hover:bg-sand-50"
+                  className="border-b border-ink-400/40 hover:bg-ink-100/50"
                 >
-                  <td className="p-2 font-semibold text-slate-900">
+                  <td className="p-2 font-semibold text-slate-100">
                     {voter.name || "—"}
                   </td>
-                  <td className="p-2 text-slate-700">
+                  <td className="p-2 text-slate-200">
                     {voter.voter_id || "—"}
                   </td>
-                  <td className="p-2 text-slate-700 capitalize">
+                  <td className="p-2 text-slate-200 capitalize">
                     {voter.gender || "—"}
                   </td>
-                  <td className="p-2 text-slate-700">{voter.age ?? "—"}</td>
-                  <td className="p-2 text-slate-700">
+                  <td className="p-2 text-slate-200">{voter.age ?? "—"}</td>
+                  <td className="p-2 text-slate-200">
                     {voter.house_number || "—"}
                   </td>
-                  <td className="p-2 text-slate-700">
+                  <td className="p-2 text-slate-200">
                     {voter.relation_type || "—"}
                   </td>
-                  <td className="p-2 text-slate-700">
+                  <td className="p-2 text-slate-200">
                     {voter.part_number || "—"}
                   </td>
-                  <td className="p-2 text-slate-700">{voter.section || "—"}</td>
-                  <td className="p-2 text-slate-700">
+                  <td className="p-2 text-slate-200">{voter.section || "—"}</td>
+                  <td className="p-2 text-slate-200">
                     {voter.assembly || "—"}
                   </td>
-                  <td className="p-2 text-slate-700">
+                  <td className="p-2 text-slate-200">
                     {voter.serial_number || "—"}
                   </td>
                 </tr>
@@ -114,7 +114,7 @@ export default function VoterTable({ voters = [], loading, error }) {
 
       {!loading && !error && voters.length > pageSize && (
         <div className="flex items-center justify-between pt-2">
-          <div className="text-sm text-slate-600">
+          <div className="text-sm text-slate-300">
             Page {page} of {pages}
           </div>
           <div className="flex gap-2">

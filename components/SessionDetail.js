@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import VoterFilters from "./VoterFilters";
@@ -22,7 +22,6 @@ export default function SessionDetail() {
   const [loadingVoters, setLoadingVoters] = useState(true);
   const [errorSession, setErrorSession] = useState("");
   const [errorVoters, setErrorVoters] = useState("");
-  const pollRef = useRef(null);
   const voterController = useRef(null);
   const statusController = useRef(null);
   const [statusInfo, setStatusInfo] = useState(null);
@@ -35,12 +34,6 @@ export default function SessionDetail() {
       .then((res) => {
         const data = res.session || res;
         setSession(data);
-        if (data?.status && data.status.toLowerCase().includes("process")) {
-          startPolling();
-        } else if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
       })
       .catch((err) => setErrorSession(err.message || "Failed to load session"))
       .finally(() => {
@@ -54,19 +47,14 @@ export default function SessionDetail() {
     const controller = signal ? { signal } : new AbortController();
     if (!signal) statusController.current = controller;
     getSessionStatus(id, controller.signal)
-      .then((payload) => setStatusInfo(normalizeStatus(payload)))
+      .then((payload) => {
+        const normalized = normalizeStatus(payload);
+        setStatusInfo(normalized);
+      })
       .catch((err) => {
         if (err.name === "AbortError") return;
         // keep silent for status errors
       });
-  };
-
-  const startPolling = () => {
-    if (pollRef.current) return;
-    pollRef.current = setInterval(() => {
-      fetchSession(undefined, { silent: true });
-      fetchStatus();
-    }, 2500);
   };
 
   useEffect(() => {
@@ -75,54 +63,50 @@ export default function SessionDetail() {
     fetchStatus(controller.signal);
     return () => {
       controller.abort();
-      if (pollRef.current) clearInterval(pollRef.current);
       if (statusController.current) statusController.current.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const fetchVoters = (filters) => {
-    if (!id) return;
-    if (voterController.current) voterController.current.abort();
-    const controller = new AbortController();
-    voterController.current = controller;
-    setLoadingVoters(true);
-    setErrorVoters("");
-    getSessionVoters(id, filters, controller.signal)
-      .then((res) => setVoters(res.voters || res))
-      .catch((err) => {
-        if (err.name === "AbortError") return;
-        setErrorVoters(err.message || "Failed to load voters");
-      })
-      .finally(() => setLoadingVoters(false));
-  };
-
-  const filterQuery = useMemo(() => {
-    const q = { ...router.query };
-    delete q.id;
-    return q;
-  }, [router.query]);
+  const fetchVoters = useCallback(
+    (filters) => {
+      if (!id) return;
+      if (voterController.current) voterController.current.abort();
+      const controller = new AbortController();
+      voterController.current = controller;
+      setLoadingVoters(true);
+      setErrorVoters("");
+      getSessionVoters(id, filters, controller.signal)
+        .then((res) => setVoters(res.voters || res))
+        .catch((err) => {
+          if (err.name === "AbortError") return;
+          setErrorVoters(err.message || "Failed to load voters");
+        })
+        .finally(() => setLoadingVoters(false));
+    },
+    [id]
+  );
 
   useEffect(() => {
-    fetchVoters(filterQuery);
+    fetchVoters({});
     return () => {
       if (voterController.current) voterController.current.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, JSON.stringify(filterQuery)]);
+  }, [fetchVoters]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-slate-100">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="space-y-1">
-          <Link href="/sessions" className="text-sm text-teal-700">
+          <Link
+            href="/sessions"
+            className="text-sm text-neon-200 hover:text-neon-100"
+          >
             ← Back to sessions
           </Link>
-          <h1 className="text-2xl font-display font-semibold text-slate-900">
-            Session {id}
-          </h1>
+          <h1 className="text-2xl font-display font-semibold">Session {id}</h1>
           {session?.original_filename && (
-            <div className="text-slate-700">{session.original_filename}</div>
+            <div className="text-slate-200/80">{session.original_filename}</div>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -149,33 +133,33 @@ export default function SessionDetail() {
       </div>
 
       {errorSession && (
-        <div className="p-3 bg-rose-50 text-rose-800 rounded-lg border border-rose-200">
+        <div className="p-3 bg-rose-900/50 text-rose-100 rounded-lg border border-rose-700">
           {errorSession}
         </div>
       )}
       {loadingSession && (
-        <div className="p-3 text-slate-600">Loading session…</div>
+        <div className="p-3 text-slate-200">Loading session…</div>
       )}
 
       {session && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="card space-y-3 lg:col-span-2">
-            <h3 className="text-lg font-semibold text-slate-900">Summary</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm text-slate-700">
+          <div className="card space-y-3 lg:col-span-2 bg-ink-900/70 border border-ink-400/40">
+            <h3 className="text-lg font-semibold text-slate-100">Summary</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm text-slate-200">
               <div>
-                <div className="text-slate-500 text-xs">Pages</div>
+                <div className="text-slate-400 text-xs">Pages</div>
                 <div className="font-semibold text-lg">
                   {session.page_count ?? "—"}
                 </div>
               </div>
               <div>
-                <div className="text-slate-500 text-xs">Voters</div>
+                <div className="text-slate-400 text-xs">Voters</div>
                 <div className="font-semibold text-lg">
                   {session.voter_count ?? "—"}
                 </div>
               </div>
               <div>
-                <div className="text-slate-500 text-xs">Created</div>
+                <div className="text-slate-400 text-xs">Created</div>
                 <div className="font-semibold">
                   {session.created_at
                     ? new Date(session.created_at).toLocaleString()
@@ -183,7 +167,7 @@ export default function SessionDetail() {
                 </div>
               </div>
               <div>
-                <div className="text-slate-500 text-xs">Updated</div>
+                <div className="text-slate-400 text-xs">Updated</div>
                 <div className="font-semibold">
                   {session.updated_at
                     ? new Date(session.updated_at).toLocaleString()
@@ -193,14 +177,14 @@ export default function SessionDetail() {
             </div>
             {session.pages?.length ? (
               <div className="space-y-2">
-                <div className="text-sm font-semibold text-slate-800">
+                <div className="text-sm font-semibold text-slate-100">
                   Pages
                 </div>
-                <div className="flex flex-wrap gap-2 text-xs text-slate-700">
+                <div className="flex flex-wrap gap-2 text-xs text-slate-200">
                   {session.pages.map((p, idx) => (
                     <span
                       key={`${p.page || idx}`}
-                      className="badge bg-sand-100 border-sand-200"
+                      className="badge bg-ink-700/60 border-ink-500/60"
                     >
                       Page {p.page || idx + 1}
                     </span>
@@ -208,44 +192,32 @@ export default function SessionDetail() {
                 </div>
               </div>
             ) : (
-              <div className="text-sm text-slate-600">
+              <div className="text-sm text-slate-300">
                 No page details available.
               </div>
             )}
             {statusInfo && statusInfo.total > 0 && (
               <div className="space-y-1">
-                <div className="flex justify-between text-xs text-slate-600">
+                <div className="flex justify-between text-xs text-slate-300">
                   <span>Processing progress</span>
                   <span>
                     {statusInfo.processed} / {statusInfo.total} pages
                   </span>
                 </div>
-                <div className="h-2 w-full rounded-full bg-sand-100 overflow-hidden">
+                <div className="h-2 w-full rounded-full bg-ink-800 overflow-hidden">
                   <div
-                    className="h-full bg-teal-500 transition-all duration-300"
+                    className="h-full bg-neon-300 transition-all duration-300"
                     style={{ width: `${statusInfo.percent}%` }}
                   />
                 </div>
               </div>
             )}
           </div>
-          <div className="space-y-3">
-            <div className="card space-y-2">
-              <div className="text-sm text-slate-600">API</div>
-              <div className="flex flex-col gap-2">
-                <span className="badge bg-teal-50 border-teal-200 text-teal-700">
-                  GET /sessions/{id}
-                </span>
-                <span className="badge bg-teal-50 border-teal-200 text-teal-700">
-                  GET /sessions/{id}/voters
-                </span>
-              </div>
-            </div>
-          </div>
+          <div className="space-y-3" />
         </div>
       )}
 
-      <VoterFilters disabled={loadingVoters} onChange={(q) => fetchVoters(q)} />
+      <VoterFilters disabled={loadingVoters} onChange={fetchVoters} />
       <VoterTable voters={voters} loading={loadingVoters} error={errorVoters} />
     </div>
   );

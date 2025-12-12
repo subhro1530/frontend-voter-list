@@ -42,16 +42,16 @@ export default function UploadForm({ onCreated }) {
   };
 
   return (
-    <div id="upload" className="card space-y-4">
+    <div id="upload" className="card space-y-4 text-slate-100">
       <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-900">Upload PDF</h3>
-          <p className="text-sm text-slate-600">
+        <div className="space-y-1">
+          <h3 className="text-lg font-semibold text-slate-50">Upload PDF</h3>
+          <p className="text-sm text-slate-200/80">
             We will post to POST /sessions and return a session id. Add your
             Gemini key if the backend expects it.
           </p>
         </div>
-        <span className="badge bg-teal-50 border-teal-200 text-teal-700">
+        <span className="badge border-neon-300 text-neon-100 bg-ink-100/80">
           POST /sessions
         </span>
       </div>
@@ -78,7 +78,7 @@ export default function UploadForm({ onCreated }) {
           />
         </div>
         {error && (
-          <div className="p-3 bg-rose-50 text-rose-800 rounded-lg border border-rose-200">
+          <div className="p-3 bg-rose-900/50 text-rose-100 rounded-lg border border-rose-700">
             {error}
           </div>
         )}
@@ -87,14 +87,14 @@ export default function UploadForm({ onCreated }) {
         </button>
       </form>
       {loading && (
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-200">
           Processing… this can take a moment.
         </p>
       )}
       {createdId && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 space-y-2">
-          <div className="font-semibold">Session created</div>
-          <div className="text-sm break-all">ID: {createdId}</div>
+        <div className="p-3 bg-emerald-900/40 border border-emerald-600 rounded-lg text-emerald-100 space-y-2">
+          <div className="font-semibold text-emerald-100">Session created</div>
+          <div className="text-sm break-all text-emerald-50">ID: {createdId}</div>
           <div className="flex gap-2">
             <button
               className="btn btn-secondary"

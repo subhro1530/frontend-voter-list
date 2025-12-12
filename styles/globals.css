@@ -5,16 +5,23 @@
 @tailwind utilities;
 
 :root {
-  color: #e5e7eb;
-  background: #0b1220;
+  color: #e8ecf5;
+  background: #0b0f1d;
 }
 
 body {
-  @apply bg-sand-50 text-slate-100 font-body antialiased;
+  @apply bg-ink-50 text-slate-100 font-body antialiased;
+  background: radial-gradient(
+      circle at 20% 20%,
+      rgba(140, 43, 255, 0.15),
+      transparent 35%
+    ),
+    radial-gradient(circle at 80% 0%, rgba(72, 104, 191, 0.18), transparent 30%),
+    linear-gradient(135deg, #0f1427 0%, #141b35 35%, #1a2245 70%, #202c58 100%);
 }
 
 a {
-  @apply text-teal-200 hover:text-teal-100 font-semibold;
+  @apply text-neon-200 hover:text-neon-100 font-semibold;
 }
 
 .btn {
@@ -22,15 +29,48 @@ a {
 }
 
 .btn-primary {
-  @apply bg-teal-400 text-sand-50 shadow-card hover:bg-teal-300 active:scale-[0.99];
+  @apply bg-neon-500 text-white shadow-card hover:bg-neon-400 active:scale-[0.99];
 }
 
 .btn-secondary {
-  @apply bg-sand-200 text-teal-50 border border-sand-400 hover:border-teal-400 hover:text-teal-100 shadow-card;
+  @apply bg-ink-200 text-neon-100 border border-ink-400 hover:border-neon-400 hover:text-white shadow-card;
 }
 
 .card {
-  @apply bg-sand-200 shadow-card rounded-2xl p-5 border border-sand-400/70 backdrop-blur;
+  @apply bg-ink-200 shadow-card rounded-2xl p-5 border border-ink-400/70 backdrop-blur;
+}
+
+.glass-panel {
+  @apply rounded-2xl bg-ink-200/70 backdrop-blur shadow-card;
+}
+
+.glass-chip {
+  @apply rounded-xl border border-ink-400/70 bg-ink-100/80 px-3 py-2 shadow-card text-slate-100;
+}
+
+.step-pill {
+  @apply flex items-center gap-3 rounded-xl border border-ink-400/70 bg-ink-100/80 px-3 py-2 shadow-card;
+}
+
+.step-dot {
+  @apply inline-block h-3 w-3 rounded-full shadow-card;
+}
+
+.pill-pill {
+  @apply inline-flex items-center justify-center rounded-full px-3 py-1.5 font-semibold border bg-ink-100/80 text-slate-100 shadow-card;
+}
+.pill-emerald {
+  @apply border-emerald-500/60 text-emerald-100;
+}
+.pill-blue {
+  @apply border-blue-500/60 text-blue-100;
+}
+.pill-amber {
+  @apply border-amber-500/60 text-amber-100;
+}
+
+.metric-card {
+  @apply rounded-xl border border-ink-400/70 bg-ink-100/80 px-3 py-3 shadow-card;
 }
 
 .table-scroll {
@@ -41,13 +81,13 @@ a {
 .sticky-header thead th {
   position: sticky;
   top: 0;
-  background: #111a2b;
+  background: rgba(20, 27, 53, 0.92);
   z-index: 10;
 }
 
 input,
 select {
-  @apply bg-sand-100 border border-sand-400 rounded-lg px-3 py-2 w-full text-slate-50 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-teal-400;
+  @apply bg-ink-100 border border-ink-300 rounded-lg px-3 py-2 w-full text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neon-400 focus:border-neon-400;
 }
 
 label {
@@ -55,7 +95,7 @@ label {
 }
 
 .badge {
-  @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold border border-sand-500 bg-sand-100 text-slate-100;
+  @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold border border-ink-500 bg-ink-100 text-slate-100;
 }
 
 .status-pending {
