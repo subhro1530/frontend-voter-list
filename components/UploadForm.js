@@ -94,7 +94,9 @@ export default function UploadForm({ onCreated }) {
       {createdId && (
         <div className="p-3 bg-emerald-900/40 border border-emerald-600 rounded-lg text-emerald-100 space-y-2">
           <div className="font-semibold text-emerald-100">Session created</div>
-          <div className="text-sm break-all text-emerald-50">ID: {createdId}</div>
+          <div className="text-sm break-all text-emerald-50">
+            ID: {createdId}
+          </div>
           <div className="flex gap-2">
             <button
               className="btn btn-secondary"
