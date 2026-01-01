@@ -34,6 +34,10 @@ export default function UploadForm({ onCreated }) {
       const id = res.sessionId || res.session_id || res.id;
       setCreatedId(id);
       onCreated?.(id);
+      // Automatically navigate to the new session
+      if (id) {
+        router.push(`/sessions/${id}`);
+      }
     } catch (err) {
       setError(err.message || "Failed to upload.");
     } finally {

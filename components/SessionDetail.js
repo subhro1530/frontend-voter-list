@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import VoterFilters from "./VoterFilters";
 import VoterTable from "./VoterTable";
+import ApiEngineStatus from "./ApiEngineStatus";
 import {
   getSession,
   getSessionStatus,
@@ -13,6 +14,7 @@ import {
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
   if (key.includes("fail")) return "status-failed";
+  if (key.includes("paused")) return "status-paused";
   if (key.includes("process")) return "status-processing";
   if (key.includes("complete")) return "status-completed";
   return "status-pending";
@@ -152,6 +154,17 @@ export default function SessionDetail() {
           )}
         </div>
       </div>
+
+      {/* API Engine Status */}
+      <ApiEngineStatus
+        sessionId={id}
+        sessionStatus={statusInfo?.statusText || session?.status}
+        onResume={() => {
+          fetchSession();
+          fetchStatus();
+          fetchVoters({});
+        }}
+      />
 
       {errorSession && (
         <div className="p-3 bg-rose-900/50 text-rose-100 rounded-lg border border-rose-700">
