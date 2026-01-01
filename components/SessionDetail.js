@@ -3,7 +3,12 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import VoterFilters from "./VoterFilters";
 import VoterTable from "./VoterTable";
-import { getSession, getSessionStatus, getSessionVoters } from "../lib/api";
+import {
+  getSession,
+  getSessionStatus,
+  getSessionVoters,
+  getReligionStats,
+} from "../lib/api";
 
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
@@ -25,6 +30,8 @@ export default function SessionDetail() {
   const voterController = useRef(null);
   const statusController = useRef(null);
   const [statusInfo, setStatusInfo] = useState(null);
+  const [religionStats, setReligionStats] = useState(null);
+  const [currentFilters, setCurrentFilters] = useState({});
 
   const fetchSession = (signal, { silent } = {}) => {
     if (!id) return;
@@ -57,10 +64,23 @@ export default function SessionDetail() {
       });
   };
 
+  const fetchReligionStats = (signal) => {
+    if (!id) return;
+    getReligionStats(id, signal)
+      .then((data) => {
+        setReligionStats(data);
+      })
+      .catch((err) => {
+        if (err.name === "AbortError") return;
+        // Silent fail for religion stats
+      });
+  };
+
   useEffect(() => {
     const controller = new AbortController();
     fetchSession(controller.signal);
     fetchStatus(controller.signal);
+    fetchReligionStats(controller.signal);
     return () => {
       controller.abort();
       if (statusController.current) statusController.current.abort();
@@ -76,6 +96,7 @@ export default function SessionDetail() {
       voterController.current = controller;
       setLoadingVoters(true);
       setErrorVoters("");
+      setCurrentFilters(filters);
       getSessionVoters(id, filters, controller.signal)
         .then((res) => setVoters(res.voters || res))
         .catch((err) => {
@@ -217,7 +238,22 @@ export default function SessionDetail() {
         </div>
       )}
 
-      <VoterFilters disabled={loadingVoters} onChange={fetchVoters} />
+      {/* Filtered Results Status */}
+      {!loadingVoters && voters.length > 0 && (
+        <FilteredStatus
+          voterCount={voters.length}
+          totalCount={session?.voter_count}
+          filters={currentFilters}
+          religionStats={religionStats}
+        />
+      )}
+
+      <VoterFilters
+        disabled={loadingVoters}
+        onChange={fetchVoters}
+        religionStats={religionStats}
+        activeFilters={currentFilters}
+      />
       <VoterTable voters={voters} loading={loadingVoters} error={errorVoters} />
     </div>
   );
@@ -236,4 +272,86 @@ function normalizeStatus(payload) {
     ? Math.min(100, Math.round((processed / total) * 100))
     : 0;
   return { statusText, processed, total, percent };
+}
+
+const RELIGION_ICONS = {
+  Hindu: "🕉️",
+  Muslim: "☪️",
+  Christian: "✝️",
+  Sikh: "🔯",
+  Buddhist: "☸️",
+  Jain: "🙏",
+  Other: "🌐",
+};
+
+function FilteredStatus({ voterCount, totalCount, filters, religionStats }) {
+  const activeFilters = Object.entries(filters || {}).filter(
+    ([_, v]) => v !== "" && v !== undefined && v !== null
+  );
+
+  if (activeFilters.length === 0) return null;
+
+  const religionFilter = filters?.religion;
+  const religionStat = religionStats?.stats?.find(
+    (s) => s.religion === religionFilter
+  );
+
+  return (
+    <div className="filtered-status-bar">
+      <div className="filtered-status-content">
+        <div className="filtered-status-left">
+          <span className="filtered-status-icon">🎯</span>
+          <span className="filtered-status-text">
+            Showing <strong>{voterCount?.toLocaleString()}</strong>
+            {totalCount && (
+              <>
+                {" "}
+                of <strong>{totalCount?.toLocaleString()}</strong>
+              </>
+            )}{" "}
+            voters
+          </span>
+        </div>
+
+        <div className="filtered-status-right">
+          {activeFilters.map(([key, value]) => {
+            const isReligion = key === "religion";
+            const icon = isReligion ? RELIGION_ICONS[value] || "🌐" : null;
+            return (
+              <span
+                key={key}
+                className={`filter-tag ${
+                  isReligion ? "filter-tag-religion" : ""
+                }`}
+              >
+                {icon && <span className="filter-tag-icon">{icon}</span>}
+                <span className="filter-tag-key">{key}:</span>
+                <span className="filter-tag-value">{value}</span>
+              </span>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Religion specific stats in filter bar */}
+      {religionStat && (
+        <div className="religion-filter-detail">
+          <span className="text-2xl">{RELIGION_ICONS[religionFilter]}</span>
+          <div className="religion-filter-info">
+            <span className="religion-filter-name">{religionFilter}</span>
+            <span className="religion-filter-stats">
+              {religionStat.count?.toLocaleString() ?? 0} voters •{" "}
+              {Number(religionStat.percentage || 0).toFixed(1)}% of total
+            </span>
+          </div>
+          <div className="religion-filter-bar-container">
+            <div
+              className="religion-filter-bar-fill"
+              style={{ width: `${religionStat.percentage || 0}%` }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

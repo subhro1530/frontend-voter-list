@@ -110,3 +110,187 @@ label {
 .status-failed {
   @apply bg-rose-900/50 text-rose-200 border-rose-700;
 }
+
+/* Religion Stats Panel */
+.religion-stats-panel {
+  @apply p-4 rounded-xl bg-gradient-to-br from-ink-800/80 to-ink-900/60 border border-ink-500/50;
+}
+
+.religion-chips-grid {
+  @apply grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3;
+}
+
+.religion-chip {
+  @apply relative flex flex-col gap-2 p-3 rounded-xl border border-ink-500/60 bg-ink-800/50 
+         transition-all duration-200 cursor-pointer hover:border-neon-400/60 hover:bg-ink-700/60
+         hover:shadow-lg hover:shadow-neon-500/10 text-left;
+}
+
+.religion-chip-active {
+  @apply border-neon-400 bg-neon-500/20 shadow-lg shadow-neon-500/20 ring-2 ring-neon-400/30;
+}
+
+.religion-chip-header {
+  @apply flex items-center gap-2;
+}
+
+.religion-chip-icon {
+  @apply text-xl;
+}
+
+.religion-chip-name {
+  @apply text-sm font-semibold text-slate-100 truncate;
+}
+
+.religion-chip-stats {
+  @apply flex items-baseline justify-between gap-2;
+}
+
+.religion-chip-count {
+  @apply text-lg font-bold text-slate-100;
+}
+
+.religion-chip-percent {
+  @apply text-xs font-medium text-neon-300;
+}
+
+.religion-chip-bar {
+  @apply h-1.5 w-full rounded-full bg-ink-600/80 overflow-hidden;
+}
+
+.religion-chip-bar-fill {
+  @apply h-full rounded-full bg-gradient-to-r from-neon-400 to-neon-300 transition-all duration-500;
+}
+
+/* Religion Stats Unavailable */
+.religion-stats-unavailable {
+  @apply p-4 rounded-xl bg-ink-800/40 border border-ink-500/30 border-dashed;
+}
+
+/* Active Religion Filter Display */
+.active-religion-filter {
+  @apply flex items-center justify-between p-3 rounded-xl 
+         bg-gradient-to-r from-neon-500/20 to-neon-400/10 
+         border border-neon-400/40;
+}
+
+/* Filter Count Badge */
+.filter-count-badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold
+         bg-neon-500/30 text-neon-200 border border-neon-400/50;
+}
+
+/* Filtered Status Bar */
+.filtered-status-bar {
+  @apply rounded-xl overflow-hidden border border-ink-400/50 bg-ink-900/70;
+}
+
+.filtered-status-content {
+  @apply flex flex-wrap items-center justify-between gap-3 p-3;
+}
+
+.filtered-status-left {
+  @apply flex items-center gap-2;
+}
+
+.filtered-status-icon {
+  @apply text-lg;
+}
+
+.filtered-status-text {
+  @apply text-sm text-slate-200;
+}
+
+.filtered-status-right {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.filter-tag {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium
+         bg-ink-700/70 border border-ink-500/60 text-slate-200;
+}
+
+.filter-tag-religion {
+  @apply bg-gradient-to-r from-neon-500/25 to-neon-400/15 border-neon-400/50 text-neon-100;
+}
+
+.filter-tag-icon {
+  @apply text-sm;
+}
+
+.filter-tag-key {
+  @apply text-slate-400 capitalize;
+}
+
+.filter-tag-value {
+  @apply text-slate-100 font-semibold;
+}
+
+/* Religion Filter Detail Bar */
+.religion-filter-detail {
+  @apply flex items-center gap-4 px-4 py-3 bg-gradient-to-r from-neon-500/15 to-transparent
+         border-t border-ink-500/40;
+}
+
+.religion-filter-info {
+  @apply flex flex-col;
+}
+
+.religion-filter-name {
+  @apply text-sm font-bold text-slate-100;
+}
+
+.religion-filter-stats {
+  @apply text-xs text-slate-300;
+}
+
+.religion-filter-bar-container {
+  @apply flex-1 h-2 rounded-full bg-ink-700/80 overflow-hidden ml-4;
+}
+
+.religion-filter-bar-fill {
+  @apply h-full rounded-full bg-gradient-to-r from-neon-400 via-neon-300 to-emerald-400 
+         transition-all duration-700 ease-out;
+}
+
+/* Translate Button */
+.translate-btn {
+  @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold
+         bg-ink-700/70 border border-ink-500/60 text-slate-200
+         hover:border-blue-400/60 hover:bg-blue-500/20 hover:text-blue-100
+         transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.translate-btn-active {
+  @apply bg-emerald-500/20 border-emerald-400/60 text-emerald-100
+         hover:bg-emerald-500/30 hover:border-emerald-400;
+}
+
+.translate-spinner {
+  @apply inline-block w-4 h-4 border-2 border-slate-400 border-t-neon-400 rounded-full;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Translation Progress */
+.translation-progress {
+  @apply flex items-center gap-3 p-3 rounded-lg bg-blue-500/10 border border-blue-400/30;
+}
+
+.translation-progress-bar {
+  @apply flex-1 h-2 rounded-full bg-ink-700/80 overflow-hidden;
+}
+
+.translation-progress-fill {
+  @apply h-full rounded-full bg-gradient-to-r from-blue-400 to-emerald-400 
+         transition-all duration-300 ease-out;
+}
+
+.translation-progress-text {
+  @apply text-xs text-blue-200 font-medium whitespace-nowrap;
+}
