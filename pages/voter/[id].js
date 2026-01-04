@@ -140,12 +140,16 @@ function VoterDetailContent() {
             <h2 className="text-xl font-bold text-neon-200">
               🗳️ VOTER INFORMATION SLIP
             </h2>
-            <p className="text-sm text-slate-400 mt-1">Official Reference Document</p>
+            <p className="text-sm text-slate-400 mt-1">
+              Official Reference Document
+            </p>
           </div>
 
           {/* Voter ID Highlight */}
           <div className="text-center p-4 bg-gradient-to-r from-neon-500/20 to-neon-400/10 rounded-xl border border-neon-400/30">
-            <p className="text-sm text-slate-400 mb-1">Voter ID (EPIC Number)</p>
+            <p className="text-sm text-slate-400 mb-1">
+              Voter ID (EPIC Number)
+            </p>
             <p className="text-2xl font-bold font-mono text-neon-200 tracking-wider">
               {voter.voter_id || "—"}
             </p>
@@ -175,7 +179,13 @@ function VoterDetailContent() {
           </div>
 
           <div className="grid grid-cols-1 gap-4">
-            <InfoItem label="Voter Name" value={voter.name} icon="👤" large highlight />
+            <InfoItem
+              label="Voter Name"
+              value={voter.name}
+              icon="👤"
+              large
+              highlight
+            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -191,19 +201,29 @@ function VoterDetailContent() {
           {/* Polling Station (if available) */}
           {voter.polling_station && (
             <div className="p-4 bg-emerald-500/10 rounded-xl border border-emerald-400/30">
-              <InfoItem 
-                label="Polling Station" 
-                value={voter.polling_station} 
-                icon="🏢" 
-                large 
+              <InfoItem
+                label="Polling Station"
+                value={voter.polling_station}
+                icon="🏢"
+                large
               />
             </div>
           )}
 
           {/* Footer */}
           <div className="text-center text-xs text-slate-400 pt-4 border-t border-ink-400/50 print-footer">
-            <p>This is an unofficial voter information slip for reference purposes only.</p>
-            <p className="mt-1">Generated on {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+            <p>
+              This is an unofficial voter information slip for reference
+              purposes only.
+            </p>
+            <p className="mt-1">
+              Generated on{" "}
+              {new Date().toLocaleDateString("en-IN", {
+                day: "2-digit",
+                month: "long",
+                year: "numeric",
+              })}
+            </p>
           </div>
         </div>
       </div>
@@ -243,10 +263,14 @@ function VoterDetailContent() {
 
       {/* Print Instructions */}
       <div className="print-hide card bg-blue-500/10 border-blue-400/30">
-        <h4 className="text-sm font-semibold text-blue-200 mb-2">💡 Print as PDF Instructions</h4>
+        <h4 className="text-sm font-semibold text-blue-200 mb-2">
+          💡 Print as PDF Instructions
+        </h4>
         <ul className="text-sm text-slate-300 space-y-1">
           <li>• Click "Print as PDF" button above</li>
-          <li>• In the print dialog, select "Save as PDF" as the destination</li>
+          <li>
+            • In the print dialog, select "Save as PDF" as the destination
+          </li>
           <li>• Choose A5 or A4 paper size for best results</li>
           <li>• Enable "Background graphics" for colored sections</li>
         </ul>
@@ -257,8 +281,9 @@ function VoterDetailContent() {
 
 function InfoItem({ label, value, icon, large, highlight, capitalize }) {
   // Handle object values safely
-  const displayValue = typeof value === 'object' ? JSON.stringify(value) : value;
-  
+  const displayValue =
+    typeof value === "object" ? JSON.stringify(value) : value;
+
   return (
     <div
       className={`p-3 rounded-xl bg-ink-100/30 border border-ink-400/30 ${

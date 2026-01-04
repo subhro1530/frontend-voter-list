@@ -270,37 +270,44 @@ Remember: Be helpful, accurate, and make the user's experience delightful!`;
   // Fallback responses when API is unavailable
   const getFallbackResponse = (userMessage) => {
     const lowerMsg = userMessage.toLowerCase();
-    
+
     // Greetings
     if (/^(hi|hello|hey|greetings)/i.test(lowerMsg)) {
       return "Hello! 👋 I'm your Voter List Assistant. While my AI brain is taking a break, I can still help with basic questions about the app. Try asking about searching voters or navigating the application!";
     }
-    
+
     // Stats questions
-    if (lowerMsg.includes("how many") && (lowerMsg.includes("voter") || lowerMsg.includes("total"))) {
+    if (
+      lowerMsg.includes("how many") &&
+      (lowerMsg.includes("voter") || lowerMsg.includes("total"))
+    ) {
       return "📊 To see the total number of voters, check the Admin Dashboard or the Statistics page. You can also search for voters using the Search page!";
     }
-    
+
     // Search help
     if (lowerMsg.includes("search") || lowerMsg.includes("find")) {
       return "🔍 **To search for voters:**\n\n1. Go to the **Search** page\n2. Use filters like Assembly, Part Number, Name, or Voter ID\n3. Click **Search** to find voters\n4. Click on any voter to see details and print their slip";
     }
-    
+
     // Print help
     if (lowerMsg.includes("print") || lowerMsg.includes("pdf")) {
       return "🖨️ **To print a voter slip:**\n\n1. Search for the voter\n2. Click on their row to open details\n3. Click **Print as PDF**\n4. In the print dialog, select **Save as PDF**\n5. Choose A5 paper size for best results";
     }
-    
+
     // Upload help
     if (lowerMsg.includes("upload") || lowerMsg.includes("pdf")) {
       return "📤 **To upload a voter list PDF (Admin only):**\n\n1. Go to **Upload** page\n2. Select your PDF file\n3. Wait for OCR processing\n4. View extracted voters in Sessions";
     }
-    
+
     // Navigation help
-    if (lowerMsg.includes("help") || lowerMsg.includes("how to") || lowerMsg.includes("what can")) {
+    if (
+      lowerMsg.includes("help") ||
+      lowerMsg.includes("how to") ||
+      lowerMsg.includes("what can")
+    ) {
       return "🎯 **I can help you with:**\n\n• **Search Voters** - Find voters by name, ID, assembly\n• **Print Slips** - Generate voter information slips\n• **Upload PDFs** - OCR processing (Admin)\n• **View Statistics** - Demographics & analytics\n\nWhat would you like to do?";
     }
-    
+
     // Default
     return "I'm having trouble connecting to my AI brain right now 🧠 But I can still help!\n\n**Quick links:**\n• 🔍 Search voters → /search\n• 📊 View stats → /admin/stats\n• 📤 Upload PDF → /upload\n\nOr try asking about specific features!";
   };
@@ -332,12 +339,16 @@ Remember: Be helpful, accurate, and make the user's experience delightful!`;
       } else {
         // Try Gemini first, fallback to local responses
         let aiResponse = await callGeminiAPI(userMessage, messages);
-        
+
         // If API failed with quota or connection error, use fallback
-        if (aiResponse.includes("quota") || aiResponse.includes("trouble connecting") || aiResponse.includes("API key")) {
+        if (
+          aiResponse.includes("quota") ||
+          aiResponse.includes("trouble connecting") ||
+          aiResponse.includes("API key")
+        ) {
           aiResponse = getFallbackResponse(userMessage);
         }
-        
+
         setMessages((prev) => [
           ...prev,
           { role: "assistant", content: aiResponse },
