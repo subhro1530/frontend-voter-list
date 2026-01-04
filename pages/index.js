@@ -1,7 +1,36 @@
+import { useEffect } from "react";
+import { useRouter } from "next/router";
 import Link from "next/link";
+import { useAuth } from "../context/AuthContext";
 import UploadForm from "../components/UploadForm";
 
 export default function Home() {
+  const { user, isAuthenticated, isAdmin, isLoading } = useAuth();
+  const router = useRouter();
+
+  // Redirect authenticated users to their appropriate page
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      if (isAdmin) {
+        router.push("/admin/dashboard");
+      } else {
+        router.push("/search");
+      }
+    }
+  }, [isLoading, isAuthenticated, isAdmin, router]);
+
+  // Show loading while checking auth or redirecting
+  if (isLoading || isAuthenticated) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-neon-400 border-t-transparent"></div>
+          <p className="text-slate-300">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-12">
       <section className="relative overflow-hidden rounded-3xl border border-ink-400/60 bg-gradient-to-br from-ink-100 to-ink-200 p-8 lg:p-10 shadow-2xl">

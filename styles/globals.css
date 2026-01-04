@@ -473,3 +473,86 @@ label {
   @apply inline-block w-4 h-4 border-2 border-slate-400/40 border-t-slate-300 rounded-full;
   animation: spin 1s linear infinite;
 }
+
+/* Navigation Links */
+.nav-link {
+  @apply px-3 py-2 rounded-lg text-slate-200 hover:text-neon-100 hover:bg-ink-200/50 
+         transition-all duration-200 font-medium;
+}
+
+/* Chatbot Animations */
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+/* Print Styles - Comprehensive PDF Output */
+@media print {
+  /* Hide everything except the print content */
+  body * {
+    visibility: hidden;
+  }
+
+  .voter-slip-print,
+  .voter-slip-print * {
+    visibility: visible !important;
+  }
+
+  .voter-slip-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+  }
+
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Reset backgrounds for print */
+  body {
+    background: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .voter-slip-print .card {
+    background: white !important;
+    border: 2px solid #333 !important;
+    box-shadow: none !important;
+    color: black !important;
+    padding: 24px !important;
+    border-radius: 8px !important;
+    max-width: 600px !important;
+    margin: 0 auto !important;
+  }
+
+  /* Make text black for print */
+  .voter-slip-print h1,
+  .voter-slip-print h2,
+  .voter-slip-print h3,
+  .voter-slip-print p,
+  .voter-slip-print span,
+  .voter-slip-print div {
+    color: black !important;
+  }
+
+  /* Hide scrollbars */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Page settings */
+  @page {
+    size: A5 portrait;
+    margin: 15mm;
+  }
+}
