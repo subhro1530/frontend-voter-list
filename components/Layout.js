@@ -3,11 +3,15 @@ import Link from "next/link";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { useAuth } from "../context/AuthContext";
+import { useLanguage } from "../context/LanguageContext";
 import Footer from "./Footer";
 import ChatBot from "./ChatBot";
+import AgentChat from "./AgentChat";
+import LanguageSelector from "./LanguageSelector";
 
 export default function Layout({ children }) {
   const { user, isAuthenticated, isAdmin, logout, isLoading } = useAuth();
+  const { t } = useLanguage();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const profileRef = useRef(null);
@@ -42,7 +46,7 @@ export default function Layout({ children }) {
       }}
     >
       <Head>
-        <title>Voter List Console</title>
+        <title>{t("Voter List Console")}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta
           name="description"
@@ -60,40 +64,64 @@ export default function Layout({ children }) {
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-neon-500/20 text-neon-100 font-bold border border-neon-400/50">
               VL
             </span>
-            <span className="hidden sm:inline">Voter List Console</span>
+            <span className="hidden sm:inline">{t("Voter List Console")}</span>
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-3 text-sm font-semibold">
+          <nav className="hidden lg:flex items-center gap-2 text-sm font-semibold">
+            {/* Language Selector */}
+            <LanguageSelector />
+
             {!isLoading && (
               <>
                 {isAuthenticated ? (
                   <>
                     {isAdmin ? (
                       <>
-                        <Link className="nav-link" href="/admin/dashboard">
-                          Dashboard
+                        <Link
+                          className="nav-link text-xs px-2"
+                          href="/admin/dashboard"
+                        >
+                          {t("Dashboard")}
                         </Link>
-                        <Link className="nav-link" href="/sessions">
-                          Sessions
+                        <Link
+                          className="nav-link text-xs px-2"
+                          href="/sessions"
+                        >
+                          {t("Sessions")}
                         </Link>
-                        <Link className="nav-link" href="/upload">
-                          Upload
+                        <Link className="nav-link text-xs px-2" href="/upload">
+                          {t("Upload")}
                         </Link>
-                        <Link className="nav-link" href="/admin/users">
-                          Users
+                        <Link
+                          className="nav-link text-xs px-2"
+                          href="/admin/users"
+                        >
+                          {t("Users")}
                         </Link>
-                        <Link className="nav-link" href="/admin/api-keys">
-                          API Keys
+                        <Link
+                          className="nav-link text-xs px-2"
+                          href="/admin/api-keys"
+                        >
+                          {t("API Keys")}
                         </Link>
-                        <Link className="nav-link" href="/admin/stats">
-                          Stats
+                        <Link
+                          className="nav-link text-xs px-2"
+                          href="/admin/stats"
+                        >
+                          {t("Stats")}
+                        </Link>
+                        <Link
+                          className="nav-link text-xs px-2 bg-purple-600/20 border-purple-500/50"
+                          href="/admin/agent"
+                        >
+                          🤖
                         </Link>
                       </>
                     ) : (
                       <>
                         <Link className="nav-link" href="/search">
-                          Search Voters
+                          {t("Search Voters")}
                         </Link>
                       </>
                     )}
@@ -154,7 +182,7 @@ export default function Layout({ children }) {
                               className="block px-4 py-2 text-sm text-slate-200 hover:bg-ink-100/50 transition-colors"
                               onClick={() => setShowProfileMenu(false)}
                             >
-                              <span className="mr-2">👤</span> My Profile
+                              <span className="mr-2">👤</span> {t("My Profile")}
                             </Link>
                             {isAdmin && (
                               <Link
@@ -162,7 +190,8 @@ export default function Layout({ children }) {
                                 className="block px-4 py-2 text-sm text-slate-200 hover:bg-ink-100/50 transition-colors"
                                 onClick={() => setShowProfileMenu(false)}
                               >
-                                <span className="mr-2">📊</span> Admin Dashboard
+                                <span className="mr-2">📊</span>{" "}
+                                {t("Admin Dashboard")}
                               </Link>
                             )}
                             <button
@@ -172,7 +201,7 @@ export default function Layout({ children }) {
                               }}
                               className="w-full text-left px-4 py-2 text-sm text-rose-300 hover:bg-rose-900/30 transition-colors"
                             >
-                              <span className="mr-2">🚪</span> Sign Out
+                              <span className="mr-2">🚪</span> {t("Sign Out")}
                             </button>
                           </div>
                         </div>
@@ -183,10 +212,10 @@ export default function Layout({ children }) {
                   !isAuthPage && (
                     <>
                       <Link className="btn btn-secondary" href="/login">
-                        Sign In
+                        {t("Sign In")}
                       </Link>
                       <Link className="btn btn-primary" href="/register">
-                        Register
+                        {t("Register")}
                       </Link>
                     </>
                   )
@@ -229,6 +258,11 @@ export default function Layout({ children }) {
         {showMobileMenu && (
           <div className="md:hidden border-t border-ink-400/50 bg-ink-100/95 backdrop-blur">
             <div className="px-4 py-4 space-y-2">
+              {/* Mobile Language Selector */}
+              <div className="px-3 py-2 mb-3">
+                <LanguageSelector className="w-full" />
+              </div>
+
               {isAuthenticated ? (
                 <>
                   <div className="flex items-center gap-3 px-3 py-2 mb-3 bg-ink-200/50 rounded-xl">
@@ -250,35 +284,50 @@ export default function Layout({ children }) {
                   {isAdmin ? (
                     <>
                       <MobileNavLink href="/admin/dashboard">
-                        Dashboard
+                        {t("Dashboard")}
                       </MobileNavLink>
-                      <MobileNavLink href="/sessions">Sessions</MobileNavLink>
-                      <MobileNavLink href="/upload">Upload PDF</MobileNavLink>
-                      <MobileNavLink href="/admin/users">Users</MobileNavLink>
+                      <MobileNavLink href="/sessions">
+                        {t("Sessions")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/upload">
+                        {t("Upload")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/admin/users">
+                        {t("Users")}
+                      </MobileNavLink>
                       <MobileNavLink href="/admin/api-keys">
-                        API Keys
+                        {t("API Keys")}
                       </MobileNavLink>
                       <MobileNavLink href="/admin/stats">
-                        Statistics
+                        {t("Stats")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/admin/agent">
+                        🤖 {t("Agent")}
                       </MobileNavLink>
                     </>
                   ) : (
-                    <MobileNavLink href="/search">Search Voters</MobileNavLink>
+                    <MobileNavLink href="/search">
+                      {t("Search Voters")}
+                    </MobileNavLink>
                   )}
 
-                  <MobileNavLink href="/profile">My Profile</MobileNavLink>
+                  <MobileNavLink href="/profile">
+                    {t("My Profile")}
+                  </MobileNavLink>
 
                   <button
                     onClick={logout}
                     className="w-full text-left px-3 py-2 text-rose-300 hover:bg-rose-900/30 rounded-lg transition-colors"
                   >
-                    Sign Out
+                    {t("Sign Out")}
                   </button>
                 </>
               ) : (
                 <>
-                  <MobileNavLink href="/login">Sign In</MobileNavLink>
-                  <MobileNavLink href="/register">Register</MobileNavLink>
+                  <MobileNavLink href="/login">{t("Sign In")}</MobileNavLink>
+                  <MobileNavLink href="/register">
+                    {t("Register")}
+                  </MobileNavLink>
                 </>
               )}
             </div>
@@ -305,8 +354,8 @@ export default function Layout({ children }) {
       {/* Sticky Footer with Credits */}
       <Footer />
 
-      {/* Chatbot - positioned above footer */}
-      {isAuthenticated && <ChatBot />}
+      {/* AI Agent Chat for admins, regular ChatBot for users */}
+      {isAuthenticated && (isAdmin ? <AgentChat /> : <ChatBot />)}
     </div>
   );
 }
