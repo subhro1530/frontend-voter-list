@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import ProtectedRoute from "../../components/ProtectedRoute";
+import ApiEngineStatus from "../../components/ApiEngineStatus";
 import { getApiKeysStatus, resetApiKeys } from "../../lib/api";
 import toast from "react-hot-toast";
 
@@ -86,6 +87,9 @@ function AdminApiKeysContent() {
           {error}
         </div>
       )}
+
+      {/* Engine Status Dashboard */}
+      <ApiEngineStatus showSummary={true} pollInterval={5000} />
 
       {/* All Exhausted Alert */}
       {status?.allExhausted && (

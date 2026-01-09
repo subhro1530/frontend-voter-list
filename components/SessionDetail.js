@@ -9,15 +9,27 @@ import {
   getSessionStatus,
   getSessionVoters,
   getReligionStats,
+  stopSession,
+  resumeSession,
+  renameSession,
 } from "../lib/api";
 
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
   if (key.includes("fail")) return "status-failed";
-  if (key.includes("paused")) return "status-paused";
+  if (key.includes("paused") || key.includes("stopped")) return "status-paused";
   if (key.includes("process")) return "status-processing";
   if (key.includes("complete")) return "status-completed";
   return "status-pending";
+};
+
+const statusIcon = (status) => {
+  const key = (status || "").toLowerCase();
+  if (key.includes("fail")) return "❌";
+  if (key.includes("paused") || key.includes("stopped")) return "⏸️";
+  if (key.includes("process")) return "⏳";
+  if (key.includes("complete")) return "✅";
+  return "📋";
 };
 
 export default function SessionDetail() {
@@ -34,6 +46,8 @@ export default function SessionDetail() {
   const [statusInfo, setStatusInfo] = useState(null);
   const [religionStats, setReligionStats] = useState(null);
   const [currentFilters, setCurrentFilters] = useState({});
+  const [actionLoading, setActionLoading] = useState("");
+  const [renameModal, setRenameModal] = useState(false);
 
   const fetchSession = (signal, { silent } = {}) => {
     if (!id) return;
@@ -42,9 +56,36 @@ export default function SessionDetail() {
     getSession(id, signal)
       .then((res) => {
         const data = res.session || res;
-        setSession(data);
+        // Normalize field names from different backend versions
+        const normalizedSession = {
+          ...data,
+          page_count:
+            data.page_count ??
+            data.pageCount ??
+            data.pages?.length ??
+            data.totalPages ??
+            null,
+          voter_count:
+            data.voter_count ??
+            data.voterCount ??
+            data.totalVoters ??
+            data.voters?.length ??
+            null,
+          status: data.status ?? data.state ?? null,
+          created_at: data.created_at ?? data.createdAt ?? null,
+          updated_at: data.updated_at ?? data.updatedAt ?? null,
+          original_filename:
+            data.original_filename ??
+            data.originalFilename ??
+            data.filename ??
+            null,
+        };
+        setSession(normalizedSession);
       })
-      .catch((err) => setErrorSession(err.message || "Failed to load session"))
+      .catch((err) => {
+        if (err.name === "AbortError") return;
+        setErrorSession(err.message || "Failed to load session");
+      })
       .finally(() => {
         if (!silent) setLoadingSession(false);
       });
@@ -90,6 +131,44 @@ export default function SessionDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Auto-polling for live status updates (every 5 seconds)
+  useEffect(() => {
+    if (!id) return;
+
+    // Only poll if session is still processing
+    const shouldPoll = () => {
+      const status = (
+        statusInfo?.statusText ||
+        session?.status ||
+        ""
+      ).toLowerCase();
+      return (
+        status.includes("process") ||
+        status.includes("pending") ||
+        status.includes("upload")
+      );
+    };
+
+    if (!shouldPoll()) return;
+
+    const pollInterval = setInterval(() => {
+      const controller = new AbortController();
+
+      // Silent fetch - no loading spinners
+      fetchSession(controller.signal, { silent: true });
+      fetchStatus(controller.signal);
+
+      // Also refresh voters silently if filters are empty
+      if (Object.keys(currentFilters).length === 0) {
+        getSessionVoters(id, {}, controller.signal)
+          .then((res) => setVoters(res.voters || res))
+          .catch(() => {}); // Silent fail
+      }
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [id, statusInfo?.statusText, session?.status, currentFilters]);
+
   const fetchVoters = useCallback(
     (filters) => {
       if (!id) return;
@@ -117,6 +196,54 @@ export default function SessionDetail() {
     };
   }, [fetchVoters]);
 
+  const handleStop = async () => {
+    setActionLoading("stop");
+    try {
+      await stopSession(id);
+      fetchSession();
+      fetchStatus();
+    } catch (err) {
+      setErrorSession(err.message || "Failed to stop session");
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const handleResume = async () => {
+    setActionLoading("resume");
+    try {
+      await resumeSession(id);
+      fetchSession();
+      fetchStatus();
+    } catch (err) {
+      setErrorSession(err.message || "Failed to resume session");
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const handleRename = async (newName) => {
+    try {
+      await renameSession(id, newName);
+      setRenameModal(false);
+      fetchSession();
+    } catch (err) {
+      setErrorSession(err.message || "Failed to rename session");
+    }
+  };
+
+  const currentStatus = (
+    statusInfo?.statusText ||
+    session?.status ||
+    ""
+  ).toLowerCase();
+  const isProcessing = currentStatus.includes("process");
+  const isPaused =
+    currentStatus.includes("paused") || currentStatus.includes("stopped");
+  const isFailed = currentStatus.includes("fail");
+  const canStop = isProcessing;
+  const canResume = isPaused || isFailed;
+
   return (
     <div className="space-y-4 text-slate-100">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -127,12 +254,45 @@ export default function SessionDetail() {
           >
             ← Back to sessions
           </Link>
-          <h1 className="text-2xl font-display font-semibold">Session {id}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-display font-semibold">
+              Session {id}
+            </h1>
+            <button
+              onClick={() => setRenameModal(true)}
+              className="text-slate-400 hover:text-neon-400 transition-colors"
+              title="Rename session"
+            >
+              ✏️
+            </button>
+          </div>
           {session?.original_filename && (
             <div className="text-slate-200/80">{session.original_filename}</div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Stop button */}
+          {canStop && (
+            <button
+              className="btn bg-amber-600 hover:bg-amber-500 text-white"
+              onClick={handleStop}
+              disabled={actionLoading === "stop"}
+            >
+              {actionLoading === "stop" ? "Stopping…" : "🛑 Stop"}
+            </button>
+          )}
+
+          {/* Resume button */}
+          {canResume && (
+            <button
+              className="btn bg-emerald-600 hover:bg-emerald-500 text-white"
+              onClick={handleResume}
+              disabled={actionLoading === "resume"}
+            >
+              {actionLoading === "resume" ? "Resuming…" : "▶️ Resume"}
+            </button>
+          )}
+
           <button
             className="btn btn-secondary"
             onClick={() => {
@@ -141,7 +301,7 @@ export default function SessionDetail() {
             }}
             disabled={loadingSession}
           >
-            Refresh
+            🔄 Refresh
           </button>
           {(session?.status || statusInfo?.statusText) && (
             <span
@@ -149,11 +309,21 @@ export default function SessionDetail() {
                 statusInfo?.statusText || session?.status
               )}`}
             >
+              {statusIcon(statusInfo?.statusText || session?.status)}{" "}
               {statusInfo?.statusText || session?.status}
             </span>
           )}
         </div>
       </div>
+
+      {/* Rename Modal */}
+      {renameModal && session && (
+        <RenameModal
+          currentName={session.original_filename}
+          onClose={() => setRenameModal(false)}
+          onRename={handleRename}
+        />
+      )}
 
       {/* API Engine Status */}
       <ApiEngineStatus
@@ -183,13 +353,16 @@ export default function SessionDetail() {
               <div>
                 <div className="text-slate-400 text-xs">Pages</div>
                 <div className="font-semibold text-lg">
-                  {session.page_count ?? "—"}
+                  {session.page_count ?? statusInfo?.total ?? "—"}
                 </div>
               </div>
               <div>
                 <div className="text-slate-400 text-xs">Voters</div>
                 <div className="font-semibold text-lg">
-                  {session.voter_count ?? "—"}
+                  {session.voter_count ??
+                    statusInfo?.voterCount ??
+                    voters.length ??
+                    "—"}
                 </div>
               </div>
               <div>
@@ -273,18 +446,32 @@ export default function SessionDetail() {
 }
 
 function normalizeStatus(payload) {
-  const statusText = payload?.status || payload?.state;
-  const processed = payload?.processed_pages ?? payload?.processed ?? 0;
+  const statusText =
+    payload?.status || payload?.state || payload?.processingStatus;
+  const processed =
+    payload?.processed_pages ??
+    payload?.processedPages ??
+    payload?.processed ??
+    payload?.completedPages ??
+    0;
   const total =
     payload?.page_count ??
+    payload?.pageCount ??
     payload?.total_pages ??
+    payload?.totalPages ??
     payload?.pages ??
     payload?.total ??
+    0;
+  const voterCount =
+    payload?.voter_count ??
+    payload?.voterCount ??
+    payload?.totalVoters ??
+    payload?.voters ??
     0;
   const percent = total
     ? Math.min(100, Math.round((processed / total) * 100))
     : 0;
-  return { statusText, processed, total, percent };
+  return { statusText, processed, total, percent, voterCount };
 }
 
 const RELIGION_ICONS = {
@@ -365,6 +552,56 @@ function FilteredStatus({ voterCount, totalCount, filters, religionStats }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function RenameModal({ currentName, onClose, onRename }) {
+  const [name, setName] = useState(currentName || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    await onRename(name.trim());
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="bg-ink-200 border border-ink-400 rounded-xl p-6 w-full max-w-md shadow-2xl">
+        <h3 className="text-lg font-bold text-slate-100 mb-4">
+          ✏️ Rename Session
+        </h3>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-4 py-3 bg-ink-100 border border-ink-400 rounded-lg text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-neon-400"
+            placeholder="Enter new name"
+            autoFocus
+          />
+          <div className="flex gap-3 mt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2 border border-ink-400 rounded-lg text-slate-300 hover:bg-ink-100 transition-colors"
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-2 bg-neon-500 text-white rounded-lg hover:bg-neon-400 transition-colors disabled:opacity-50"
+              disabled={saving || !name.trim()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

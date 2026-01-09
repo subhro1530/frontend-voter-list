@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
-import { userAPI, adminAPI, getSessions } from "../lib/api";
+import { userAPI, adminAPI, getSessions, chatAPI } from "../lib/api";
 import Link from "next/link";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
@@ -927,18 +927,51 @@ Respond helpfully but SECURELY.`;
 
           case "general":
           default:
-            // Try Gemini for general queries, with fallback
-            const aiResponse = await callSecureGeminiAPI(
-              userMessage,
-              intent,
-              contextData
-            );
+            // Try backend chat API first, then Gemini fallback
+            try {
+              const backendResponse = await chatAPI.sendMessage(userMessage);
+              if (backendResponse && backendResponse.response) {
+                response = {
+                  text: backendResponse.response,
+                  actions: [],
+                  suggestions: backendResponse.suggestions || [],
+                  action: backendResponse.action,
+                  actionResult: backendResponse.actionResult,
+                  isMarkdown: true,
+                };
+              } else {
+                // Fallback to Gemini API
+                const aiResponse = await callSecureGeminiAPI(
+                  userMessage,
+                  intent,
+                  contextData
+                );
 
-            if (aiResponse) {
-              response = { text: aiResponse, actions: [] };
-            } else {
-              // Fallback response
-              response = ResponseGenerator.getHelpResponse(role, user?.name);
+                if (aiResponse) {
+                  response = { text: aiResponse, actions: [] };
+                } else {
+                  // Fallback response
+                  response = ResponseGenerator.getHelpResponse(
+                    role,
+                    user?.name
+                  );
+                }
+              }
+            } catch (backendError) {
+              console.error("Backend chat error:", backendError);
+              // Fallback to Gemini API
+              const aiResponse = await callSecureGeminiAPI(
+                userMessage,
+                intent,
+                contextData
+              );
+
+              if (aiResponse) {
+                response = { text: aiResponse, actions: [] };
+              } else {
+                // Fallback response
+                response = ResponseGenerator.getHelpResponse(role, user?.name);
+              }
             }
             break;
         }
@@ -977,15 +1010,119 @@ Respond helpfully but SECURELY.`;
     }
   };
 
-  // Render message content with links
+  // Render message content with links and markdown support
   const renderMessageContent = (content) => {
     if (typeof content === "string") {
       return <div className="whitespace-pre-wrap text-sm">{content}</div>;
     }
 
+    // Simple markdown-like rendering (for tables and formatting)
+    const renderTextWithMarkdown = (text) => {
+      if (!text) return null;
+
+      // Check if text contains markdown tables
+      if (text.includes("|") && text.includes("---")) {
+        const lines = text.split("\n");
+        const elements = [];
+        let tableLines = [];
+        let inTable = false;
+
+        lines.forEach((line, idx) => {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith("|") && trimmedLine.endsWith("|")) {
+            inTable = true;
+            tableLines.push(trimmedLine);
+          } else {
+            if (inTable && tableLines.length > 0) {
+              elements.push(renderMarkdownTable(tableLines, idx));
+              tableLines = [];
+              inTable = false;
+            }
+            if (trimmedLine) {
+              elements.push(
+                <p key={idx} className="mb-1">
+                  {renderInlineMarkdown(trimmedLine)}
+                </p>
+              );
+            }
+          }
+        });
+
+        if (tableLines.length > 0) {
+          elements.push(renderMarkdownTable(tableLines, "end"));
+        }
+
+        return <div className="space-y-1">{elements}</div>;
+      }
+
+      return (
+        <div className="whitespace-pre-wrap">{renderInlineMarkdown(text)}</div>
+      );
+    };
+
+    const renderInlineMarkdown = (text) => {
+      // Bold text
+      const parts = text.split(/\*\*(.*?)\*\*/g);
+      return parts.map((part, i) =>
+        i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+      );
+    };
+
+    const renderMarkdownTable = (lines, key) => {
+      if (lines.length < 2) return null;
+
+      const parseRow = (row) =>
+        row
+          .split("|")
+          .filter((cell) => cell.trim())
+          .map((cell) => cell.trim());
+
+      const headers = parseRow(lines[0]);
+      const dataRows = lines.slice(2).map(parseRow);
+
+      return (
+        <div key={key} className="overflow-x-auto my-2">
+          <table className="min-w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-ink-100/50">
+                {headers.map((header, i) => (
+                  <th
+                    key={i}
+                    className="px-2 py-1 border border-ink-400/30 text-left font-semibold"
+                  >
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dataRows.map((row, rowIdx) => (
+                <tr key={rowIdx} className="hover:bg-ink-100/30">
+                  {row.map((cell, cellIdx) => (
+                    <td
+                      key={cellIdx}
+                      className="px-2 py-1 border border-ink-400/30"
+                    >
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    };
+
     return (
       <div className="space-y-3">
-        <div className="whitespace-pre-wrap text-sm">{content.text}</div>
+        <div className="text-sm">
+          {content.isMarkdown ? (
+            renderTextWithMarkdown(content.text)
+          ) : (
+            <div className="whitespace-pre-wrap">{content.text}</div>
+          )}
+        </div>
 
         {/* Render voter results */}
         {content.voters && content.voters.length > 0 && (
@@ -1023,6 +1160,21 @@ Respond helpfully but SECURELY.`;
           </div>
         )}
 
+        {/* Render suggestions from backend */}
+        {content.suggestions && content.suggestions.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {content.suggestions.map((suggestion, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSend(suggestion)}
+                className="text-xs px-2 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 hover:bg-blue-500/30 transition-colors"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Render action links */}
         {content.actions && content.actions.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
@@ -1047,7 +1199,7 @@ Respond helpfully but SECURELY.`;
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full bg-gradient-to-br from-neon-500 to-neon-600 text-white shadow-lg hover:shadow-neon-500/30 hover:scale-105 transition-all flex items-center justify-center"
+        className="fixed bottom-20 right-6 z-50 h-14 w-14 rounded-full bg-gradient-to-br from-neon-500 to-neon-600 text-white shadow-lg hover:shadow-neon-500/30 hover:scale-105 transition-all flex items-center justify-center"
         aria-label="Open chat assistant"
       >
         <span className="text-2xl">💬</span>
@@ -1056,7 +1208,7 @@ Respond helpfully but SECURELY.`;
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] h-[600px] max-h-[calc(100vh-6rem)] flex flex-col rounded-2xl bg-ink-200 border border-ink-400 shadow-2xl overflow-hidden">
+    <div className="fixed bottom-20 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] h-[500px] max-h-[calc(100vh-8rem)] flex flex-col rounded-2xl bg-ink-200 border border-ink-400 shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-ink-400/50 bg-gradient-to-r from-neon-500/20 to-neon-400/10">
         <div className="flex items-center gap-3">

@@ -3,6 +3,8 @@ import Link from "next/link";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { useAuth } from "../context/AuthContext";
+import Footer from "./Footer";
+import ChatBot from "./ChatBot";
 
 export default function Layout({ children }) {
   const { user, isAuthenticated, isAdmin, logout, isLoading } = useAuth();
@@ -283,8 +285,10 @@ export default function Layout({ children }) {
           </div>
         )}
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8 space-y-6">{children}</main>
-      <footer className="border-t border-ink-400/70 bg-ink-100/80">
+      <main className="mx-auto max-w-6xl px-4 py-8 pb-20 space-y-6">
+        {children}
+      </main>
+      <footer className="border-t border-ink-400/70 bg-ink-100/80 mb-12">
         <div className="mx-auto max-w-6xl px-4 py-6 text-sm text-slate-300 flex flex-wrap items-center justify-between gap-2">
           <span>Powered by Gemini OCR → Neon → Next.js</span>
           <div className="flex gap-3">
@@ -297,6 +301,12 @@ export default function Layout({ children }) {
           </div>
         </div>
       </footer>
+
+      {/* Sticky Footer with Credits */}
+      <Footer />
+
+      {/* Chatbot - positioned above footer */}
+      {isAuthenticated && <ChatBot />}
     </div>
   );
 }
