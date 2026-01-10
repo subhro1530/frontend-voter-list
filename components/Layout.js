@@ -5,9 +5,37 @@ import { useRouter } from "next/router";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import Footer from "./Footer";
-import ChatBot from "./ChatBot";
-import AgentChat from "./AgentChat";
 import LanguageSelector from "./LanguageSelector";
+
+// Tooltip component for helpful descriptions
+function Tooltip({ children, text }) {
+  return (
+    <div className="relative group/tooltip">
+      {children}
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-50 whitespace-nowrap pointer-events-none">
+        <p className="text-xs text-slate-200 font-normal">{text}</p>
+        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-ink-400"></div>
+      </div>
+    </div>
+  );
+}
+
+// NavLink with optional tooltip
+function NavLink({ href, children, tooltip, className = "" }) {
+  const link = (
+    <Link
+      href={href}
+      className={`nav-link text-xs px-2 py-1.5 whitespace-nowrap ${className}`}
+    >
+      {children}
+    </Link>
+  );
+
+  if (tooltip) {
+    return <Tooltip text={tooltip}>{link}</Tooltip>;
+  }
+  return link;
+}
 
 export default function Layout({ children }) {
   const { user, isAuthenticated, isAdmin, logout, isLoading } = useAuth();
@@ -68,9 +96,11 @@ export default function Layout({ children }) {
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden lg:flex items-center gap-2 text-sm font-semibold">
+          <nav className="hidden xl:flex items-center gap-1 text-sm font-semibold flex-shrink-0">
             {/* Language Selector */}
-            <LanguageSelector />
+            <Tooltip text="Change display language">
+              <LanguageSelector />
+            </Tooltip>
 
             {!isLoading && (
               <>
@@ -78,84 +108,97 @@ export default function Layout({ children }) {
                   <>
                     {isAdmin ? (
                       <>
-                        <Link
-                          className="nav-link text-xs px-2"
+                        <NavLink
                           href="/admin/dashboard"
+                          tooltip="View system overview & statistics"
                         >
                           {t("Dashboard")}
-                        </Link>
-                        <Link
-                          className="nav-link text-xs px-2"
+                        </NavLink>
+                        <NavLink
                           href="/sessions"
+                          tooltip="View uploaded PDF batches"
                         >
                           {t("Sessions")}
-                        </Link>
-                        <Link className="nav-link text-xs px-2" href="/upload">
+                        </NavLink>
+                        <NavLink
+                          href="/upload"
+                          tooltip="Upload new voter list PDFs"
+                        >
                           {t("Upload")}
-                        </Link>
-                        <Link
-                          className="nav-link text-xs px-2"
+                        </NavLink>
+                        <NavLink
                           href="/admin/users"
+                          tooltip="Manage user accounts & roles"
                         >
                           {t("Users")}
-                        </Link>
-                        <Link
-                          className="nav-link text-xs px-2"
+                        </NavLink>
+                        <NavLink
                           href="/admin/api-keys"
+                          tooltip="Manage API access keys"
                         >
                           {t("API Keys")}
-                        </Link>
-                        <Link
-                          className="nav-link text-xs px-2"
+                        </NavLink>
+                        <NavLink
                           href="/admin/stats"
+                          tooltip="View detailed analytics & charts"
                         >
                           {t("Stats")}
-                        </Link>
-                        <Link
-                          className="nav-link text-xs px-2 bg-purple-600/20 border-purple-500/50"
-                          href="/admin/agent"
+                        </NavLink>
+                        <NavLink
+                          href="/agent"
+                          tooltip="Ask AI questions about your data"
+                          className="bg-purple-600/20 border-purple-500/50"
                         >
-                          🤖
-                        </Link>
+                          🤖 AI
+                        </NavLink>
                       </>
                     ) : (
                       <>
-                        <Link className="nav-link" href="/search">
+                        <NavLink
+                          href="/search"
+                          tooltip="Search for voters by name, ID, or address"
+                        >
                           {t("Search Voters")}
-                        </Link>
+                        </NavLink>
+                        <NavLink
+                          href="/agent"
+                          tooltip="Ask AI questions about voter data"
+                          className="bg-purple-600/20 border-purple-500/50"
+                        >
+                          🤖 AI
+                        </NavLink>
                       </>
                     )}
 
                     {/* Profile Dropdown */}
-                    <div className="relative" ref={profileRef}>
-                      <button
-                        onClick={() => setShowProfileMenu(!showProfileMenu)}
-                        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-ink-200 border border-ink-400 hover:border-neon-400 transition-all"
-                      >
-                        <div className="h-8 w-8 rounded-full bg-neon-500/30 flex items-center justify-center text-neon-100 font-semibold border border-neon-400/50">
-                          {user?.name?.[0]?.toUpperCase() ||
-                            user?.email?.[0]?.toUpperCase() ||
-                            "U"}
-                        </div>
-                        <span className="hidden lg:inline text-slate-100 max-w-[100px] truncate">
-                          {user?.name || user?.email?.split("@")[0]}
-                        </span>
-                        <svg
-                          className={`w-4 h-4 transition-transform ${
-                            showProfileMenu ? "rotate-180" : ""
-                          }`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
+                    <div className="relative ml-1" ref={profileRef}>
+                      <Tooltip text="Your account & settings">
+                        <button
+                          onClick={() => setShowProfileMenu(!showProfileMenu)}
+                          className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-ink-200 border border-ink-400 hover:border-neon-400 transition-all"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </svg>
-                      </button>
+                          <div className="h-7 w-7 rounded-full bg-neon-500/30 flex items-center justify-center text-neon-100 text-sm font-semibold border border-neon-400/50">
+                            {user?.name?.[0]?.toUpperCase() ||
+                              user?.email?.[0]?.toUpperCase() ||
+                              "U"}
+                          </div>
+                          <svg
+                            className={`w-3 h-3 transition-transform text-slate-400 ${
+                              showProfileMenu ? "rotate-180" : ""
+                            }`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 9l-7 7-7-7"
+                            />
+                          </svg>
+                        </button>
+                      </Tooltip>
 
                       {showProfileMenu && (
                         <div className="absolute right-0 mt-2 w-56 rounded-xl bg-ink-200 border border-ink-400 shadow-xl z-50 overflow-hidden">
@@ -301,14 +344,19 @@ export default function Layout({ children }) {
                       <MobileNavLink href="/admin/stats">
                         {t("Stats")}
                       </MobileNavLink>
-                      <MobileNavLink href="/admin/agent">
+                      <MobileNavLink href="/agent">
                         🤖 {t("Agent")}
                       </MobileNavLink>
                     </>
                   ) : (
-                    <MobileNavLink href="/search">
-                      {t("Search Voters")}
-                    </MobileNavLink>
+                    <>
+                      <MobileNavLink href="/search">
+                        {t("Search Voters")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/agent">
+                        🤖 {t("Agent")}
+                      </MobileNavLink>
+                    </>
                   )}
 
                   <MobileNavLink href="/profile">
@@ -354,8 +402,28 @@ export default function Layout({ children }) {
       {/* Sticky Footer with Credits */}
       <Footer />
 
-      {/* AI Agent Chat for admins, regular ChatBot for users */}
-      {isAuthenticated && (isAdmin ? <AgentChat /> : <ChatBot />)}
+      {/* Floating AI Agent Button with tooltip */}
+      {isAuthenticated && (
+        <div className="fixed bottom-20 right-4 z-40 group/fab">
+          <Link
+            href="/agent"
+            className="w-14 h-14 bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-700 rounded-full shadow-lg shadow-purple-500/30 flex items-center justify-center text-2xl hover:scale-110 hover:shadow-xl hover:shadow-purple-500/40 transition-all"
+          >
+            <span className="group-hover/fab:scale-110 transition-transform">
+              🤖
+            </span>
+            <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-ink-100 animate-pulse"></span>
+          </Link>
+          {/* Tooltip on hover */}
+          <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg shadow-xl opacity-0 invisible group-hover/fab:opacity-100 group-hover/fab:visible transition-all duration-200 whitespace-nowrap pointer-events-none">
+            <p className="text-sm text-white font-medium">AI Assistant</p>
+            <p className="text-xs text-slate-400">
+              Ask questions about voter data
+            </p>
+            <div className="absolute left-full top-1/2 -translate-y-1/2 -ml-1 border-4 border-transparent border-l-ink-400"></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
