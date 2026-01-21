@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import ProtectedRoute from "../../components/ProtectedRoute";
+import VoterSlip, { VoterImage } from "../../components/VoterSlip";
 import { userAPI } from "../../lib/api";
 import toast from "react-hot-toast";
 
@@ -111,19 +112,32 @@ function VoterDetailContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <Link
             href="/search"
-            className="text-sm text-neon-200 hover:text-neon-100"
+            className="inline-flex items-center gap-2 text-sm text-neon-200 hover:text-neon-100 transition-colors"
           >
-            ← Back to search
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+            Back to search
           </Link>
-          <h1 className="text-2xl font-display font-semibold text-slate-100">
+          <h1 className="text-xl sm:text-2xl font-display font-semibold text-slate-100">
             Voter Details
           </h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {voter.is_printed && (
             <span className="badge bg-emerald-900/50 text-emerald-200 border-emerald-700">
               ✓ Printed
@@ -132,114 +146,66 @@ function VoterDetailContent() {
         </div>
       </div>
 
-      {/* Voter Card - Printable */}
-      <div ref={printRef} className="voter-slip-print">
-        <div className="card space-y-6">
-          {/* Header Section */}
-          <div className="text-center border-b border-ink-400/50 pb-4">
-            <h2 className="text-xl font-bold text-neon-200">
-              🗳️ VOTER INFORMATION SLIP
-            </h2>
-            <p className="text-sm text-slate-400 mt-1">
-              Official Reference Document
-            </p>
+      {/* Quick Info Card with Photo */}
+      <div className="card">
+        <div className="flex flex-col md:flex-row gap-6 items-center md:items-start">
+          {/* Voter Photo */}
+          <div className="flex-shrink-0">
+            <VoterImage voter={voter} size="xlarge" showBorder={true} />
           </div>
 
-          {/* Voter ID Highlight */}
-          <div className="text-center p-4 bg-gradient-to-r from-neon-500/20 to-neon-400/10 rounded-xl border border-neon-400/30">
-            <p className="text-sm text-slate-400 mb-1">
-              Voter ID (EPIC Number)
-            </p>
-            <p className="text-2xl font-bold font-mono text-neon-200 tracking-wider">
+          {/* Quick Info */}
+          <div className="flex-1 text-center md:text-left">
+            <h2 className="text-2xl font-bold text-neon-200 mb-2">
+              {voter.name || "—"}
+            </h2>
+            <p className="text-lg font-mono text-slate-300 mb-4">
               {voter.voter_id || "—"}
             </p>
-          </div>
 
-          {/* Location Info */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-ink-100/50 rounded-xl">
-            <InfoItem label="Assembly" value={voter.assembly} icon="🏛️" />
-            <InfoItem label="Part Number" value={voter.part_number} icon="🧩" />
-            <InfoItem label="Section" value={voter.section} icon="📍" />
-          </div>
-
-          {/* Voter Details */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <InfoItem
-              label="Serial Number"
-              value={voter.serial_number}
-              icon="🔢"
-              large
-            />
-            <InfoItem
-              label={voter.relation_type || "Father/Husband"}
-              value={voter.relation_name}
-              icon="👨‍👩‍👧"
-              large
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4">
-            <InfoItem
-              label="Voter Name"
-              value={voter.name}
-              icon="👤"
-              large
-              highlight
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <InfoItem
-              label="House Number"
-              value={voter.house_number}
-              icon="🏠"
-            />
-            <InfoItem label="Age" value={voter.age} icon="📅" />
-            <InfoItem label="Gender" value={voter.gender} icon="⚧" capitalize />
-          </div>
-
-          {/* Polling Station (if available) */}
-          {voter.polling_station && (
-            <div className="p-4 bg-emerald-500/10 rounded-xl border border-emerald-400/30">
-              <InfoItem
-                label="Polling Station"
-                value={voter.polling_station}
-                icon="🏢"
-                large
-              />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="quick-info-item">
+                <span className="quick-info-label">Age</span>
+                <span className="quick-info-value">{voter.age || "—"}</span>
+              </div>
+              <div className="quick-info-item">
+                <span className="quick-info-label">Gender</span>
+                <span className="quick-info-value capitalize">
+                  {voter.gender || "—"}
+                </span>
+              </div>
+              <div className="quick-info-item">
+                <span className="quick-info-label">Part No.</span>
+                <span className="quick-info-value">
+                  {voter.part_number || "—"}
+                </span>
+              </div>
+              <div className="quick-info-item">
+                <span className="quick-info-label">Serial No.</span>
+                <span className="quick-info-value">
+                  {voter.serial_number || "—"}
+                </span>
+              </div>
             </div>
-          )}
-
-          {/* Footer */}
-          <div className="text-center text-xs text-slate-400 pt-4 border-t border-ink-400/50 print-footer">
-            <p>
-              This is an unofficial voter information slip for reference
-              purposes only.
-            </p>
-            <p className="mt-1">
-              Generated on{" "}
-              {new Date().toLocaleDateString("en-IN", {
-                day: "2-digit",
-                month: "long",
-                year: "numeric",
-              })}
-            </p>
           </div>
         </div>
       </div>
 
-      {/* Action Buttons - Hide on Print */}
-      <div className="flex flex-wrap gap-3 print-hide">
-        <button onClick={handlePrint} className="btn btn-primary">
+      {/* Action Buttons */}
+      <div className="flex flex-wrap gap-3">
+        <button
+          onClick={handlePrint}
+          className="btn btn-primary flex-1 sm:flex-none"
+        >
           <span className="mr-2">🖨️</span>
-          Print as PDF
+          Print Voter Slip
         </button>
 
         {!voter.is_printed && (
           <button
             onClick={handleMarkAsPrinted}
             disabled={markingPrinted}
-            className="btn btn-secondary"
+            className="btn btn-secondary flex-1 sm:flex-none"
           >
             {markingPrinted ? (
               <>
@@ -255,25 +221,110 @@ function VoterDetailContent() {
           </button>
         )}
 
-        <Link href="/search" className="btn btn-secondary">
+        <Link href="/search" className="btn btn-secondary flex-1 sm:flex-none">
           <span className="mr-2">🔍</span>
-          Back to Search
+          Search Again
         </Link>
+      </div>
+
+      {/* Voter Slip - Printable */}
+      <div ref={printRef} className="voter-slip-print">
+        <VoterSlip voter={voter} showQR={true} />
+      </div>
+
+      {/* Additional Info Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Location Details */}
+        <div className="card">
+          <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
+            <span>📍</span> Location Details
+          </h3>
+          <div className="space-y-3">
+            <InfoItem label="Assembly" value={voter.assembly} icon="🏛️" />
+            <InfoItem label="Section" value={voter.section} icon="📍" />
+            <InfoItem
+              label="House Number"
+              value={voter.house_number}
+              icon="🏠"
+            />
+            {voter.polling_station && (
+              <InfoItem
+                label="Polling Station"
+                value={voter.polling_station}
+                icon="🏢"
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Family Details */}
+        <div className="card">
+          <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
+            <span>👨‍👩‍👧</span> Family Details
+          </h3>
+          <div className="space-y-3">
+            <InfoItem
+              label="Voter Name"
+              value={voter.name}
+              icon="👤"
+              highlight
+            />
+            <InfoItem
+              label={voter.relation_type || "Father/Husband"}
+              value={voter.relation_name}
+              icon="👨‍👧"
+            />
+          </div>
+        </div>
       </div>
 
       {/* Print Instructions */}
       <div className="print-hide card bg-blue-500/10 border-blue-400/30">
-        <h4 className="text-sm font-semibold text-blue-200 mb-2">
-          💡 Print as PDF Instructions
+        <h4 className="text-sm font-semibold text-blue-200 mb-3 flex items-center gap-2">
+          <span>💡</span> Print as PDF Instructions
         </h4>
-        <ul className="text-sm text-slate-300 space-y-1">
-          <li>• Click "Print as PDF" button above</li>
-          <li>
-            • In the print dialog, select "Save as PDF" as the destination
-          </li>
-          <li>• Choose A5 or A4 paper size for best results</li>
-          <li>• Enable "Background graphics" for colored sections</li>
-        </ul>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-slate-300">
+          <div className="flex items-start gap-2">
+            <span className="text-blue-400">1.</span>
+            <span>Click "Print Voter Slip" button above</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="text-blue-400">2.</span>
+            <span>Select "Save as PDF" as destination</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="text-blue-400">3.</span>
+            <span>Choose A5 or A4 paper size</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="text-blue-400">4.</span>
+            <span>Enable "Background graphics" option</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Help Section */}
+      <div className="print-hide card bg-gradient-to-r from-purple-500/10 to-neon-500/10 border-purple-400/30">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">📧</span>
+            <div>
+              <h4 className="text-sm font-semibold text-purple-200">
+                Need Help?
+              </h4>
+              <p className="text-sm text-slate-300">
+                Contact us for any issues
+              </p>
+            </div>
+          </div>
+          <a
+            href="mailto:acodernamedsubhro@gmail.com"
+            className="btn btn-secondary text-sm"
+          >
+            <span className="mr-2">✉️</span>
+            acodernamedsubhro@gmail.com
+          </a>
+        </div>
       </div>
     </div>
   );

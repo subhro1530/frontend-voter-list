@@ -32,8 +32,9 @@ export default function Home() {
   }
 
   return (
-    <div className="space-y-12">
-      <section className="relative overflow-hidden rounded-3xl border border-ink-400/60 bg-gradient-to-br from-ink-100 to-ink-200 p-8 lg:p-10 shadow-2xl">
+    <div className="space-y-8 sm:space-y-12">
+      {/* Hero Section */}
+      <section className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-ink-400/60 bg-gradient-to-br from-ink-100 to-ink-200 p-5 sm:p-8 lg:p-10 shadow-2xl">
         <div
           className="absolute inset-0 pointer-events-none opacity-80"
           style={{
@@ -43,77 +44,96 @@ export default function Home() {
               "radial-gradient(ellipse at 60% 80%, rgba(120,180,255,0.18), transparent 45%)",
           }}
         />
-        <div className="relative grid gap-10 lg:grid-cols-[1.3fr_1fr] items-center">
-          <div className="space-y-6">
+        <div className="relative grid gap-8 lg:gap-10 lg:grid-cols-[1.3fr_1fr] items-center">
+          <div className="space-y-5 sm:space-y-6">
             <div className="inline-flex items-center gap-2 rounded-full border border-neon-400/60 bg-neon-500/10 px-3 py-1 text-xs font-semibold text-neon-100 shadow-card">
-              Gemini OCR → Neon → Next.js
+              🗳️ Voter Management System
             </div>
             <div className="space-y-3">
-              <h1 className="text-4xl lg:text-5xl font-display font-semibold leading-tight text-slate-50">
-                Upload voter PDFs. Get structured voters. Move in minutes.
+              <h1 className="text-2xl sm:text-4xl lg:text-5xl font-display font-semibold leading-tight text-slate-50">
+                Upload voter PDFs. Get structured data. Print voter slips.
               </h1>
-              <p className="text-lg text-slate-200 max-w-2xl">
-                Drop a PDF, optionally add your Gemini key, and we spin up a
-                session that streams into Neon. Search, filter, and export on a
-                lightning-fast console built for ops teams.
+              <p className="text-base sm:text-lg text-slate-200 max-w-2xl">
+                Manage voter lists efficiently with our powerful console. Upload
+                PDFs, search voters instantly, and print official voter
+                information slips.
               </p>
             </div>
-            <div className="flex flex-wrap gap-3">
+
+            {/* CTA Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3">
               <Link
-                href="/sessions"
-                className="btn btn-primary text-base px-5 py-3"
+                href="/register"
+                className="btn btn-primary text-base px-5 py-3 w-full sm:w-auto justify-center"
               >
-                View Sessions
+                <span className="mr-2">🚀</span> Get Started Free
               </Link>
               <Link
-                href="/upload"
-                className="btn btn-secondary text-base px-5 py-3"
+                href="/login"
+                className="btn btn-secondary text-base px-5 py-3 w-full sm:w-auto justify-center"
               >
-                Upload a PDF
+                <span className="mr-2">👤</span> Sign In
               </Link>
-              <div className="inline-flex items-center gap-2 rounded-full border border-ink-400/70 bg-ink-100/70 px-3 py-2 text-sm text-slate-200">
-                <span className="h-2 w-2 rounded-full bg-neon-300" /> Live
-                filters • CSV export
+            </div>
+
+            {/* Features Pills */}
+            <div className="flex flex-wrap gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                Live search
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/50 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-200">
+                🖨️ Print slips
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-400/50 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
+                📊 CSV export
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+
+            {/* Key Features Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 text-sm">
               {[
-                "Neon-backed search",
-                "Shareable filter URLs",
-                "Abortable fetch with retry",
+                { icon: "🔍", text: "Instant search" },
+                { icon: "🖨️", text: "Voter slip printing" },
+                { icon: "📱", text: "Mobile friendly" },
               ].map((item) => (
-                <div key={item} className="glass-chip">
-                  {item}
+                <div
+                  key={item.text}
+                  className="glass-chip flex items-center gap-2"
+                >
+                  <span>{item.icon}</span>
+                  <span>{item.text}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="space-y-4">
+          {/* Right Panel - Pipeline */}
+          <div className="space-y-4 hidden lg:block">
             <div className="glass-panel p-5 border border-ink-400/60 shadow-2xl">
               <div className="flex items-center justify-between mb-3 text-sm text-slate-200">
-                <span className="font-semibold">Pipeline</span>
+                <span className="font-semibold">How it works</span>
                 <span className="text-neon-200">3 steps</span>
               </div>
               <ol className="space-y-3 text-slate-100">
                 <li className="step-pill">
-                  <span className="step-dot bg-neon-300" /> POST /sessions with
-                  your PDF
+                  <span className="step-dot bg-neon-300" /> Upload voter list
+                  PDF
                 </li>
                 <li className="step-pill">
-                  <span className="step-dot bg-blue-300" /> Gemini OCR processes
-                  pages
+                  <span className="step-dot bg-blue-300" /> AI extracts voter
+                  data
                 </li>
                 <li className="step-pill">
-                  <span className="step-dot bg-emerald-300" /> Rows land in
-                  Neon, ready to query
+                  <span className="step-dot bg-emerald-300" /> Search & print
+                  slips
                 </li>
               </ol>
               <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
                 {[
                   { label: "Fast search", tone: "emerald" },
-                  { label: "Shareable filters", tone: "blue" },
-                  { label: "CSV export", tone: "amber" },
+                  { label: "Print ready", tone: "blue" },
+                  { label: "Export CSV", tone: "amber" },
                 ].map((pill) => (
                   <div
                     key={pill.label}
@@ -124,93 +144,63 @@ export default function Home() {
                 ))}
               </div>
             </div>
-            <div className="glass-panel p-4 grid grid-cols-2 gap-3 text-sm">
-              {[
-                "Neon vector speed",
-                "Zero-copy filters",
-                "Abortable fetch",
-                "Gemini-ready",
-              ].map((k) => (
-                <div key={k} className="flex items-center gap-2 text-slate-200">
-                  <span className="h-2 w-2 rounded-full bg-neon-300" />
-                  <span>{k}</span>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-        <div className="xl:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-wide text-neon-200 font-semibold">
-                Upload now
-              </p>
-              <h2 className="text-2xl font-display font-semibold text-slate-50">
-                Create a session
-              </h2>
-              <p className="text-slate-300">
-                Send a PDF, optionally include your Gemini key, and start
-                processing immediately.
-              </p>
-            </div>
-            <Link
-              href="/sessions"
-              className="text-sm text-neon-200 hover:text-neon-100 font-semibold"
-            >
-              View active sessions →
-            </Link>
+      {/* Features Section */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          {
+            icon: "📄",
+            title: "PDF Upload",
+            desc: "Upload voter list PDFs and we extract all voter information automatically",
+          },
+          {
+            icon: "🔍",
+            title: "Smart Search",
+            desc: "Find any voter instantly by name, ID, area, or other details",
+          },
+          {
+            icon: "🖨️",
+            title: "Print Slips",
+            desc: "Generate official voter information slips matching ECI format",
+          },
+          {
+            icon: "📱",
+            title: "Mobile Ready",
+            desc: "Works perfectly on all devices - desktop, tablet, or phone",
+          },
+        ].map((feature) => (
+          <div key={feature.title} className="card text-center">
+            <div className="text-3xl mb-3">{feature.icon}</div>
+            <h3 className="font-semibold text-slate-100 mb-2">
+              {feature.title}
+            </h3>
+            <p className="text-sm text-slate-400">{feature.desc}</p>
           </div>
-          <div className="glass-panel p-5 border border-ink-400/70">
-            <UploadForm />
-          </div>
-        </div>
+        ))}
+      </section>
 
-        <div className="space-y-4">
-          <div className="glass-panel p-5 border border-ink-400/70">
-            <h3 className="text-lg font-semibold text-slate-50 mb-3">
-              Playbook
+      {/* Contact Section */}
+      <section className="card bg-gradient-to-r from-purple-500/10 to-neon-500/10 border-purple-400/30">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-100 mb-1">
+              Need help or have questions?
             </h3>
-            <ul className="space-y-2 text-sm text-slate-200">
-              <li>
-                • Base URL comes from NEXT_PUBLIC_API_BASE (or /api proxy).
-              </li>
-              <li>
-                • Requests retry once with gentle backoff and abort support.
-              </li>
-              <li>
-                • Filters stay local for speed; CSV uses your current view.
-              </li>
-              <li>• Gemini key is stored locally to speed up testing.</li>
-            </ul>
+            <p className="text-sm text-slate-400">
+              We&apos;re here to help with any website functionality related
+              queries
+            </p>
           </div>
-          <div className="glass-panel p-5 border border-ink-400/70">
-            <h3 className="text-lg font-semibold text-slate-50 mb-3">
-              Why it feels fast
-            </h3>
-            <div className="grid grid-cols-1 gap-3 text-sm text-slate-200">
-              <div className="metric-card">
-                <span className="text-xs text-slate-400">Latency</span>
-                <div className="text-xl font-semibold text-neon-100">
-                  Sub-200ms searches
-                </div>
-              </div>
-              <div className="metric-card">
-                <span className="text-xs text-slate-400">Filters</span>
-                <div className="text-xl font-semibold text-neon-100">
-                  Instant client merges
-                </div>
-              </div>
-              <div className="metric-card">
-                <span className="text-xs text-slate-400">Exports</span>
-                <div className="text-xl font-semibold text-neon-100">
-                  One-click CSV
-                </div>
-              </div>
-            </div>
-          </div>
+          <a
+            href="mailto:acodernamedsubhro@gmail.com"
+            className="btn btn-secondary whitespace-nowrap"
+          >
+            <span className="mr-2">📧</span>
+            Contact Us
+          </a>
         </div>
       </section>
     </div>

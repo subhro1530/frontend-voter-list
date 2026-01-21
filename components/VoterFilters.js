@@ -91,12 +91,12 @@ export default function VoterFilters({
       { key: "assembly", label: "🏛️ Assembly", type: "text" },
       { key: "serialNumber", label: "🔢 Serial #", type: "number", min: 0 },
     ],
-    []
+    [],
   );
 
   // Calculate active filter count for display
   const activeFilterCount = Object.values(values).filter(
-    (v) => v !== "" && v !== undefined && v !== null
+    (v) => v !== "" && v !== undefined && v !== null,
   ).length;
 
   return (
@@ -173,7 +173,7 @@ export default function VoterFilters({
                       style={{
                         width: `${Math.min(
                           100,
-                          Number(stat.percentage) || 0
+                          Number(stat.percentage) || 0,
                         )}%`,
                       }}
                     />
@@ -222,12 +222,12 @@ export default function VoterFilters({
       )}
 
       {/* Standard Filter Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {inputs.map((input) => (
           <div key={input.key} className="space-y-1">
             <label
               htmlFor={input.key}
-              className="block text-sm font-medium text-slate-200"
+              className="block text-xs sm:text-sm font-medium text-slate-200"
             >
               {input.label}
             </label>

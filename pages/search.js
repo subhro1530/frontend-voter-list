@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import ProtectedRoute from "../components/ProtectedRoute";
+import { VoterImage } from "../components/VoterSlip";
+import HelpBanner from "../components/HelpBanner";
 import { userAPI } from "../lib/api";
 
 export default function SearchPage() {
@@ -112,7 +114,7 @@ function SearchContent() {
             limit: 50,
             total: res.voters?.length || 0,
             totalPages: 1,
-          }
+          },
         );
       } catch (err) {
         setError(err.message || "Failed to search voters");
@@ -120,7 +122,7 @@ function SearchContent() {
         setLoading(false);
       }
     },
-    [filters, pagination.limit]
+    [filters, pagination.limit],
   );
 
   const handleSearch = (e) => {
@@ -293,16 +295,80 @@ function SearchContent() {
       {/* Results */}
       {voters.length > 0 && (
         <div className="card space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <h3 className="text-lg font-semibold text-slate-100">
               Results ({pagination.total || voters.length} voters)
             </h3>
+            <div className="text-sm text-slate-400">
+              Page {pagination.page} of {pagination.totalPages || 1}
+            </div>
           </div>
 
-          <div className="table-scroll">
+          {/* Mobile Card View */}
+          <div className="voter-cards-mobile">
+            {voters.map((voter) => (
+              <div
+                key={`mobile-${voter.id || voter.voter_id}`}
+                className="voter-card-mobile"
+                onClick={() => handleVoterClick(voter.id || voter.voter_id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) =>
+                  e.key === "Enter" &&
+                  handleVoterClick(voter.id || voter.voter_id)
+                }
+              >
+                <div className="voter-card-mobile-header">
+                  <VoterImage voter={voter} size="medium" />
+                  <div className="voter-card-mobile-info">
+                    <h4 className="voter-card-mobile-name">
+                      {voter.name || "—"}
+                    </h4>
+                    <p className="voter-card-mobile-id font-mono">
+                      {voter.voter_id || "—"}
+                    </p>
+                  </div>
+                  <div className="voter-card-mobile-badge">
+                    <span className="text-xs capitalize">
+                      {voter.gender || "—"}
+                    </span>
+                    <span className="text-sm font-bold">
+                      {voter.age ?? "—"}
+                    </span>
+                  </div>
+                </div>
+                <div className="voter-card-mobile-details">
+                  <div className="voter-card-mobile-detail">
+                    <span className="detail-icon">🏠</span>
+                    <span className="detail-label">House:</span>
+                    <span className="detail-value">
+                      {voter.house_number || "—"}
+                    </span>
+                  </div>
+                  <div className="voter-card-mobile-detail">
+                    <span className="detail-icon">👨‍👧</span>
+                    <span className="detail-label">Father:</span>
+                    <span className="detail-value truncate">
+                      {voter.relation_name || "—"}
+                    </span>
+                  </div>
+                </div>
+                <div className="voter-card-mobile-footer">
+                  <span className="text-xs text-slate-400">
+                    Serial #{voter.serial_number || "—"}
+                  </span>
+                  <span className="btn-view-mobile">View & Print →</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="table-scroll voter-table-desktop">
             <table className="w-full text-sm sticky-header">
               <thead className="text-left">
                 <tr className="text-slate-200">
+                  <th className="p-2">Photo</th>
                   <th className="p-2">Serial</th>
                   <th className="p-2">Voter ID</th>
                   <th className="p-2">Name</th>
@@ -317,13 +383,16 @@ function SearchContent() {
                 {voters.map((voter) => (
                   <tr
                     key={voter.id || voter.voter_id}
-                    className="border-b border-ink-400/40 hover:bg-ink-100/50 cursor-pointer"
+                    className="border-b border-ink-400/40 hover:bg-ink-100/50 cursor-pointer transition-colors"
                     onClick={() => handleVoterClick(voter.id || voter.voter_id)}
                   >
+                    <td className="p-2">
+                      <VoterImage voter={voter} size="small" />
+                    </td>
                     <td className="p-2 text-slate-200">
                       {voter.serial_number || "—"}
                     </td>
-                    <td className="p-2 text-slate-200 font-mono">
+                    <td className="p-2 text-slate-200 font-mono text-xs">
                       {voter.voter_id || "—"}
                     </td>
                     <td className="p-2 font-semibold text-slate-100">
@@ -341,13 +410,13 @@ function SearchContent() {
                     </td>
                     <td className="p-2">
                       <button
-                        className="btn btn-secondary text-xs py-1 px-2"
+                        className="btn btn-primary text-xs py-1 px-3"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleVoterClick(voter.id || voter.voter_id);
                         }}
                       >
-                        View
+                        <span className="mr-1">🖨️</span> View & Print
                       </button>
                     </td>
                   </tr>
@@ -390,11 +459,26 @@ function SearchContent() {
           <h3 className="text-lg font-semibold text-slate-100 mb-2">
             No Results
           </h3>
-          <p className="text-slate-300">
+          <p className="text-slate-300 mb-4">
             Use the filters above to search for voters
           </p>
+          <div className="text-sm text-slate-400 max-w-md mx-auto">
+            <p className="mb-2">
+              💡 <strong>Tips:</strong>
+            </p>
+            <ul className="text-left space-y-1">
+              <li>• Select an assembly first to narrow down results</li>
+              <li>• Try searching by Voter ID for exact matches</li>
+              <li>
+                • Use partial names if you&apos;re unsure of exact spelling
+              </li>
+            </ul>
+          </div>
         </div>
       )}
+
+      {/* Help Banner */}
+      <HelpBanner className="print-hide" />
     </div>
   );
 }

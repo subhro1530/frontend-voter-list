@@ -1,5 +1,7 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import CsvExportButton from "./CsvExportButton";
+import { VoterImage } from "./VoterSlip";
 
 // Fields that contain translatable text
 const TRANSLATABLE_FIELDS = ["name", "relation_type", "section", "assembly"];
@@ -9,7 +11,7 @@ async function translateText(text, targetLang = "en") {
   if (!text || text === "—") return text;
   try {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(
-      text
+      text,
     )}`;
     const res = await fetch(url);
     const data = await res.json();
@@ -72,11 +74,11 @@ export default function VoterTable({ voters = [], loading, error }) {
               }
             }
             return translatedVoter;
-          })
+          }),
         );
         translated.push(...translatedBatch);
         setTranslationProgress(
-          Math.round((translated.length / voters.length) * 100)
+          Math.round((translated.length / voters.length) * 100),
         );
       }
 
@@ -91,22 +93,22 @@ export default function VoterTable({ voters = [], loading, error }) {
   }, [voters, isTranslated, translating]);
 
   return (
-    <div className="card space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="card space-y-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="text-sm text-slate-200">
           Showing {paged.length} of {displayVoters.length} voters
           {isTranslated && (
             <span className="ml-2 text-emerald-400 font-medium">
-              (Translated to English)
+              (Translated)
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-sm w-full sm:w-auto">
           {/* Translate Button */}
           <button
             onClick={handleTranslate}
             disabled={translating || loading || !voters.length}
-            className={`translate-btn ${
+            className={`translate-btn flex-1 sm:flex-none ${
               isTranslated ? "translate-btn-active" : ""
             }`}
             title={
@@ -116,36 +118,44 @@ export default function VoterTable({ voters = [], loading, error }) {
             {translating ? (
               <>
                 <span className="translate-spinner" />
-                <span>Translating... {translationProgress}%</span>
+                <span className="hidden sm:inline">
+                  Translating... {translationProgress}%
+                </span>
+                <span className="sm:hidden">{translationProgress}%</span>
               </>
             ) : isTranslated ? (
               <>
                 <span className="text-lg">🌐</span>
-                <span>Show Original</span>
+                <span className="hidden sm:inline">Show Original</span>
               </>
             ) : (
               <>
                 <span className="text-lg">🇬🇧</span>
-                <span>Translate to English</span>
+                <span className="hidden sm:inline">Translate</span>
               </>
             )}
           </button>
 
-          <label htmlFor="pageSize" className="text-slate-300">
-            Page size
-          </label>
-          <select
-            id="pageSize"
-            className="w-24"
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-          >
-            {[10, 25, 50, 100, 200].map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2 flex-1 sm:flex-none">
+            <label
+              htmlFor="pageSize"
+              className="text-slate-300 hidden sm:inline"
+            >
+              Per page
+            </label>
+            <select
+              id="pageSize"
+              className="w-20 sm:w-24 text-sm"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+            >
+              {[10, 25, 50, 100, 200].map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </div>
           <CsvExportButton
             voters={displayVoters}
             disabled={loading || !displayVoters.length}
@@ -181,80 +191,170 @@ export default function VoterTable({ voters = [], loading, error }) {
       )}
 
       {!loading && !error && voters.length > 0 && (
-        <div className="table-scroll">
-          <table className="w-full text-sm sticky-header">
-            <thead className="text-left">
-              <tr className="text-slate-200">
-                <th className="p-2">Name</th>
-                <th className="p-2">Voter ID</th>
-                <th className="p-2">Gender</th>
-                <th className="p-2">Age</th>
-                <th className="p-2">House #</th>
-                <th className="p-2">Relation</th>
-                <th className="p-2">Part</th>
-                <th className="p-2">Section</th>
-                <th className="p-2">Assembly</th>
-                <th className="p-2">Serial</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paged.map((voter) => (
-                <tr
-                  key={`${voter.voter_id}-${voter.serial_number}`}
-                  className="border-b border-ink-400/40 hover:bg-ink-100/50"
-                >
-                  <td className="p-2 font-semibold text-slate-100">
-                    {voter.name || "—"}
-                  </td>
-                  <td className="p-2 text-slate-200">
-                    {voter.voter_id || "—"}
-                  </td>
-                  <td className="p-2 text-slate-200 capitalize">
-                    {voter.gender || "—"}
-                  </td>
-                  <td className="p-2 text-slate-200">{voter.age ?? "—"}</td>
-                  <td className="p-2 text-slate-200">
-                    {voter.house_number || "—"}
-                  </td>
-                  <td className="p-2 text-slate-200">
-                    {voter.relation_type || "—"}
-                  </td>
-                  <td className="p-2 text-slate-200">
-                    {voter.part_number || "—"}
-                  </td>
-                  <td className="p-2 text-slate-200">{voter.section || "—"}</td>
-                  <td className="p-2 text-slate-200">
-                    {voter.assembly || "—"}
-                  </td>
-                  <td className="p-2 text-slate-200">
-                    {voter.serial_number || "—"}
-                  </td>
+        <>
+          {/* Mobile Card View */}
+          <div className="voter-cards-mobile">
+            {paged.map((voter) => (
+              <Link
+                key={`mobile-${voter.voter_id}-${voter.serial_number}`}
+                href={`/voter/${voter.id || voter.voter_id}`}
+                className="voter-card-mobile"
+              >
+                <div className="voter-card-mobile-header">
+                  <VoterImage voter={voter} size="medium" />
+                  <div className="voter-card-mobile-info">
+                    <h4 className="voter-card-mobile-name">
+                      {voter.name || "—"}
+                    </h4>
+                    <p className="voter-card-mobile-id">
+                      {voter.voter_id || "—"}
+                    </p>
+                  </div>
+                  <div className="voter-card-mobile-badge">
+                    <span className="text-xs capitalize">
+                      {voter.gender || "—"}
+                    </span>
+                    <span className="text-sm font-bold">
+                      {voter.age ?? "—"}
+                    </span>
+                  </div>
+                </div>
+                <div className="voter-card-mobile-details">
+                  <div className="voter-card-mobile-detail">
+                    <span className="detail-icon">🏠</span>
+                    <span className="detail-label">House:</span>
+                    <span className="detail-value">
+                      {voter.house_number || "—"}
+                    </span>
+                  </div>
+                  <div className="voter-card-mobile-detail">
+                    <span className="detail-icon">👨‍👧</span>
+                    <span className="detail-label">Relation:</span>
+                    <span className="detail-value">
+                      {voter.relation_type || "—"}
+                    </span>
+                  </div>
+                  <div className="voter-card-mobile-detail">
+                    <span className="detail-icon">📍</span>
+                    <span className="detail-label">Section:</span>
+                    <span className="detail-value">{voter.section || "—"}</span>
+                  </div>
+                  <div className="voter-card-mobile-detail">
+                    <span className="detail-icon">🔢</span>
+                    <span className="detail-label">Serial:</span>
+                    <span className="detail-value">
+                      {voter.serial_number || "—"}
+                    </span>
+                  </div>
+                </div>
+                <div className="voter-card-mobile-footer">
+                  <span className="text-xs text-slate-400">
+                    Part {voter.part_number || "—"} • {voter.assembly || "—"}
+                  </span>
+                  <span className="btn-view-mobile">View Details →</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="table-scroll voter-table-desktop">
+            <table className="w-full text-sm sticky-header">
+              <thead className="text-left">
+                <tr className="text-slate-200">
+                  <th className="p-2">Photo</th>
+                  <th className="p-2">Name</th>
+                  <th className="p-2">Voter ID</th>
+                  <th className="p-2">Gender</th>
+                  <th className="p-2">Age</th>
+                  <th className="p-2">House #</th>
+                  <th className="p-2">Relation</th>
+                  <th className="p-2">Part</th>
+                  <th className="p-2">Section</th>
+                  <th className="p-2">Assembly</th>
+                  <th className="p-2">Serial</th>
+                  <th className="p-2">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {paged.map((voter) => (
+                  <tr
+                    key={`${voter.voter_id}-${voter.serial_number}`}
+                    className="border-b border-ink-400/40 hover:bg-ink-100/50 cursor-pointer transition-colors"
+                  >
+                    <td className="p-2">
+                      <VoterImage voter={voter} size="small" />
+                    </td>
+                    <td className="p-2 font-semibold text-slate-100">
+                      {voter.name || "—"}
+                    </td>
+                    <td className="p-2 text-slate-200 font-mono text-xs">
+                      {voter.voter_id || "—"}
+                    </td>
+                    <td className="p-2 text-slate-200 capitalize">
+                      {voter.gender || "—"}
+                    </td>
+                    <td className="p-2 text-slate-200">{voter.age ?? "—"}</td>
+                    <td className="p-2 text-slate-200">
+                      {voter.house_number || "—"}
+                    </td>
+                    <td className="p-2 text-slate-200">
+                      {voter.relation_type || "—"}
+                    </td>
+                    <td className="p-2 text-slate-200">
+                      {voter.part_number || "—"}
+                    </td>
+                    <td
+                      className="p-2 text-slate-200 max-w-[150px] truncate"
+                      title={voter.section}
+                    >
+                      {voter.section || "—"}
+                    </td>
+                    <td
+                      className="p-2 text-slate-200 max-w-[150px] truncate"
+                      title={voter.assembly}
+                    >
+                      {voter.assembly || "—"}
+                    </td>
+                    <td className="p-2 text-slate-200">
+                      {voter.serial_number || "—"}
+                    </td>
+                    <td className="p-2">
+                      <Link
+                        href={`/voter/${voter.id || voter.voter_id}`}
+                        className="btn btn-primary text-xs py-1 px-3"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="mr-1">👁️</span> View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {!loading && !error && voters.length > pageSize && (
-        <div className="flex items-center justify-between pt-2">
-          <div className="text-sm text-slate-300">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-ink-400/30">
+          <div className="text-sm text-slate-300 order-2 sm:order-1">
             Page {page} of {pages}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full sm:w-auto order-1 sm:order-2">
             <button
-              className="btn btn-secondary"
+              className="btn btn-secondary flex-1 sm:flex-none"
               disabled={page === 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
-              Previous
+              ← Previous
             </button>
             <button
-              className="btn btn-primary"
+              className="btn btn-primary flex-1 sm:flex-none"
               disabled={page === pages}
               onClick={() => setPage((p) => Math.min(pages, p + 1))}
             >
-              Next
+              Next →
             </button>
           </div>
         </div>

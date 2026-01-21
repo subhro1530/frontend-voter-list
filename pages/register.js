@@ -177,6 +177,15 @@ export default function RegisterPage() {
               Sign in here
             </Link>
           </div>
+
+          <div className="text-center text-xs text-slate-400 pt-2 border-t border-ink-400/50">
+            <a
+              href="mailto:acodernamedsubhro@gmail.com"
+              className="hover:text-neon-200 transition-colors"
+            >
+              📧 Need help? Contact support
+            </a>
+          </div>
         </div>
       </div>
     </div>

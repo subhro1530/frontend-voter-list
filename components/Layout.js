@@ -269,8 +269,9 @@ export default function Layout({ children }) {
 
           {/* Mobile Menu Button */}
           <button
-            className="md:hidden p-2 text-slate-100"
+            className="xl:hidden p-2 text-slate-100 rounded-lg hover:bg-ink-200/50 transition-colors"
             onClick={() => setShowMobileMenu(!showMobileMenu)}
+            aria-label="Toggle menu"
           >
             <svg
               className="w-6 h-6"
@@ -299,7 +300,7 @@ export default function Layout({ children }) {
 
         {/* Mobile Menu */}
         {showMobileMenu && (
-          <div className="md:hidden border-t border-ink-400/50 bg-ink-100/95 backdrop-blur">
+          <div className="xl:hidden border-t border-ink-400/50 bg-ink-100/95 backdrop-blur">
             <div className="px-4 py-4 space-y-2">
               {/* Mobile Language Selector */}
               <div className="px-3 py-2 mb-3">
@@ -369,6 +370,17 @@ export default function Layout({ children }) {
                   >
                     {t("Sign Out")}
                   </button>
+
+                  {/* Contact/Help Link */}
+                  <div className="mt-3 pt-3 border-t border-ink-400/50">
+                    <a
+                      href="mailto:acodernamedsubhro@gmail.com"
+                      className="flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-neon-200 hover:bg-ink-200/30 rounded-lg transition-colors"
+                    >
+                      <span>📧</span>
+                      <span>Contact Support</span>
+                    </a>
+                  </div>
                 </>
               ) : (
                 <>
@@ -376,6 +388,17 @@ export default function Layout({ children }) {
                   <MobileNavLink href="/register">
                     {t("Register")}
                   </MobileNavLink>
+
+                  {/* Contact/Help Link */}
+                  <div className="mt-3 pt-3 border-t border-ink-400/50">
+                    <a
+                      href="mailto:acodernamedsubhro@gmail.com"
+                      className="flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-neon-200 hover:bg-ink-200/30 rounded-lg transition-colors"
+                    >
+                      <span>📧</span>
+                      <span>Contact Support</span>
+                    </a>
+                  </div>
                 </>
               )}
             </div>
@@ -386,15 +409,39 @@ export default function Layout({ children }) {
         {children}
       </main>
       <footer className="border-t border-ink-400/70 bg-ink-100/80 mb-12">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-sm text-slate-300 flex flex-wrap items-center justify-between gap-2">
-          <span>Powered by Gemini OCR → Neon → Next.js</span>
-          <div className="flex gap-3">
-            {isAuthenticated && isAdmin && (
-              <>
-                <a href="/sessions">Sessions</a>
-                <a href="/upload">Upload</a>
-              </>
-            )}
+        <div className="mx-auto max-w-6xl px-4 py-6 text-sm text-slate-300">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <span className="text-center sm:text-left">
+              Powered by Gemini OCR → Neon → Next.js
+            </span>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {isAuthenticated && isAdmin && (
+                <>
+                  <a
+                    href="/sessions"
+                    className="hover:text-neon-200 transition-colors"
+                  >
+                    Sessions
+                  </a>
+                  <span className="text-ink-400">•</span>
+                  <a
+                    href="/upload"
+                    className="hover:text-neon-200 transition-colors"
+                  >
+                    Upload
+                  </a>
+                  <span className="text-ink-400">•</span>
+                </>
+              )}
+              <a
+                href="mailto:acodernamedsubhro@gmail.com"
+                className="flex items-center gap-1 hover:text-neon-200 transition-colors"
+                title="Contact for support"
+              >
+                <span>📧</span>
+                <span className="hidden sm:inline">Support</span>
+              </a>
+            </div>
           </div>
         </div>
       </footer>
