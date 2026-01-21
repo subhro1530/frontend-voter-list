@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
+import Link from "next/link";
 import { useAuth } from "../context/AuthContext";
-import { agentAPI } from "../lib/api";
+import { SmartAgent } from "../lib/agentActions";
 import ReactMarkdown from "react-markdown";
 
 export default function AgentPage() {
@@ -18,7 +19,10 @@ export default function AgentPage() {
   if (isLoading || !isAuthenticated) {
     return (
       <div className="fixed inset-0 bg-ink-100 flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full"></div>
+          <p className="text-slate-400">Loading AI Assistant...</p>
+        </div>
       </div>
     );
   }
@@ -26,178 +30,180 @@ export default function AgentPage() {
   return (
     <>
       <Head>
-        <title>AI Agent | Voter List Console</title>
+        <title>AI Assistant | Voter List Console</title>
       </Head>
-      <AgentChatInterface isAdmin={isAdmin} user={user} />
+      <SmartAgentInterface isAdmin={isAdmin} user={user} />
     </>
   );
 }
 
-function AgentChatInterface({ isAdmin, user }) {
+function SmartAgentInterface({ isAdmin, user }) {
   const router = useRouter();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [pendingConfirmation, setPendingConfirmation] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
-  const [agentStatus, setAgentStatus] = useState(null);
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const chatContainerRef = useRef(null);
 
-  useEffect(() => {
-    loadSuggestions();
-    loadAgentStatus();
-    inputRef.current?.focus();
-  }, []);
+  // Initialize the smart agent
+  const agent = useMemo(() => new SmartAgent(isAdmin, user), [isAdmin, user]);
 
+  // Add welcome message on mount
+  useEffect(() => {
+    const welcomeMessage = {
+      role: "assistant",
+      content: `# 👋 Welcome, ${user?.name || "there"}!
+
+I'm your **AI-powered Voter Assistant** – here to make your work easier and faster.
+
+## What I can do for you:
+
+| 🔍 **Search** | 📊 **Analyze** | 🖨️ **Print** |
+|---------------|----------------|---------------|
+| Find any voter by name, ID, or location | View statistics and reports | Generate voter slips instantly |
+
+${isAdmin ? "\n👑 **Admin Mode Active** – You have full access to all features including data modification." : ""}
+
+---
+**Try saying:** "Search for voters named Ramesh" or just type **help** for more options!`,
+      type: "welcome",
+      timestamp: new Date(),
+    };
+    setMessages([welcomeMessage]);
+  }, [user, isAdmin]);
+
+  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, isTyping]);
 
-  const loadSuggestions = async () => {
-    try {
-      const data = await agentAPI.getSuggestions();
-      setSuggestions(data.suggestions || []);
-    } catch (e) {
-      setSuggestions([]);
-    }
-  };
-
-  const loadAgentStatus = async () => {
-    try {
-      const data = await agentAPI.getStatus();
-      setAgentStatus(data);
-    } catch (e) {
-      console.error("Failed to load agent status:", e);
-    }
-  };
+  // Focus input on mount
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const sendMessage = useCallback(
     async (text) => {
       if (!text.trim() || loading) return;
 
-      const userMessage = { role: "user", content: text };
+      const userMessage = {
+        role: "user",
+        content: text,
+        timestamp: new Date(),
+      };
       setMessages((prev) => [...prev, userMessage]);
       setInput("");
       setLoading(true);
+      setIsTyping(true);
 
       try {
-        let data;
-        if (pendingConfirmation) {
-          const confirm = text.toLowerCase().match(/^(yes|confirm|ok|sure|y)/)
-            ? true
-            : false;
-          data = await agentAPI.confirm(confirm);
-        } else {
-          // Pass user context for role-based filtering on backend
-          data = await agentAPI.query(text, false);
+        // Simulate typing delay for natural feel
+        await new Promise((r) => setTimeout(r, 500));
+
+        const response = await agent.processMessage(text);
+
+        setIsTyping(false);
+
+        const assistantMessage = {
+          role: "assistant",
+          content: response.content,
+          type: response.type,
+          data: response,
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+
+        // Handle special actions
+        if (response.action) {
+          handleAction(response.action);
         }
-
-        let content = "";
-        let showData = null;
-        let queryInfo = null;
-
-        if (data.success) {
-          switch (data.type) {
-            case "help":
-              setPendingConfirmation(false);
-              content = data.message;
-              break;
-            case "confirmation_required":
-              setPendingConfirmation(true);
-              content = data.response;
-              break;
-            case "query_result":
-              setPendingConfirmation(false);
-              content = data.response;
-              showData = data.data;
-              queryInfo = data.query;
-              break;
-            default:
-              setPendingConfirmation(false);
-              content = data.response || data.message || "Done!";
-          }
-        } else {
-          content = data.error || "Something went wrong";
-          setPendingConfirmation(false);
-        }
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content,
-            data: showData,
-            queryInfo,
-            type: data.type,
-            executionTime: data.executionTime,
-            rowCount: data.rowCount,
-          },
-        ]);
       } catch (error) {
+        setIsTyping(false);
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: error.message || "Network error. Please try again.",
+            content: `❌ **Error:** ${error.message}\n\nPlease try again or type **help** for assistance.`,
             type: "error",
+            timestamp: new Date(),
           },
         ]);
-        setPendingConfirmation(false);
       } finally {
         setLoading(false);
         setTimeout(() => inputRef.current?.focus(), 100);
       }
     },
-    [loading, pendingConfirmation]
+    [loading, agent],
   );
+
+  const handleAction = (action) => {
+    switch (action.type) {
+      case "print":
+        router.push(`/voter/${action.voterId}`);
+        break;
+      case "navigate":
+        router.push(action.path);
+        break;
+    }
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     sendMessage(input);
   };
 
-  const clearChat = () => {
-    setMessages([]);
-    setPendingConfirmation(false);
+  const handleQuickReply = (reply) => {
+    sendMessage(reply);
   };
 
-  // Role-based prompts
-  const adminPrompts = [
-    { icon: "📊", text: "How many voters are in the database?" },
-    { icon: "👥", text: "Show gender distribution across all sessions" },
-    { icon: "🗳️", text: "List all sessions with voter counts" },
-    { icon: "🛕", text: "Show religion breakdown" },
-    { icon: "📈", text: "What are the overall statistics?" },
-    { icon: "🔍", text: "Find top 10 assemblies by voter count" },
-  ];
+  const clearChat = () => {
+    setMessages([
+      {
+        role: "assistant",
+        content: `Chat cleared! 🧹 How can I help you?`,
+        type: "info",
+        timestamp: new Date(),
+      },
+    ]);
+  };
 
-  const userPrompts = [
-    { icon: "🔍", text: "Search voters by name" },
-    { icon: "📍", text: "Find voters in my assigned area" },
-    { icon: "👥", text: "Show voter details by voter ID" },
-    { icon: "📊", text: "How many voters can I access?" },
-    { icon: "🏠", text: "Search voters by address" },
-    { icon: "❓", text: "What can I search for?" },
-  ];
-
-  const defaultPrompts = isAdmin ? adminPrompts : userPrompts;
-
-  const promptsToShow =
-    suggestions.length > 0
-      ? suggestions.slice(0, 6).map((s, i) => ({
-          icon: ["📊", "👥", "🗳️", "🛕", "🔍", "📈"][i] || "💡",
-          text: typeof s === "string" ? s : s.text || s,
-        }))
-      : defaultPrompts;
-
-  const showWelcome = messages.length === 0;
-
-  // Navigate back based on role
   const handleBack = () => {
     router.push(isAdmin ? "/admin/dashboard" : "/search");
   };
+
+  const showWelcome = messages.length <= 1;
+
+  // Quick action buttons for empty state
+  const quickActions = isAdmin
+    ? [
+        { icon: "🔍", label: "Search Voters", action: "Search for a voter" },
+        { icon: "📊", label: "View Statistics", action: "Show me statistics" },
+        {
+          icon: "🖨️",
+          label: "Print Slip",
+          action: "I want to print a voter slip",
+        },
+        { icon: "📁", label: "Manage Sessions", action: "Show all sessions" },
+        {
+          icon: "👥",
+          label: "Gender Stats",
+          action: "Show gender distribution",
+        },
+        { icon: "🗺️", label: "By Assembly", action: "Show voters by assembly" },
+      ]
+    : [
+        { icon: "🔍", label: "Search Voters", action: "Search for a voter" },
+        { icon: "🪪", label: "Find by ID", action: "Search by voter ID" },
+        {
+          icon: "🖨️",
+          label: "Print Slip",
+          action: "I want to print a voter slip",
+        },
+        { icon: "❓", label: "Get Help", action: "What can you do?" },
+      ];
 
   return (
     <div className="fixed inset-0 flex flex-col bg-gradient-to-br from-[#0a0e1a] via-[#0f1528] to-[#151d35]">
@@ -227,33 +233,23 @@ function AgentChatInterface({ isAdmin, user }) {
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-700 flex items-center justify-center text-xl shadow-lg shadow-purple-500/25">
                 🤖
               </div>
-              {agentStatus && (
-                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full border-2 border-[#0f1528]"></span>
-              )}
+              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full border-2 border-[#0f1528] animate-pulse"></span>
             </div>
             <div>
               <h1 className="text-base font-semibold text-white">
-                AI Database Agent
+                AI Voter Assistant
               </h1>
               <div className="flex items-center gap-2 text-xs">
-                {agentStatus ? (
-                  <>
-                    <span className="text-emerald-400">●</span>
-                    <span className="text-slate-400">
-                      {agentStatus.model || "Gemini"} •{" "}
-                      {isAdmin ? "Admin" : "User"} Mode
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-slate-500">Connecting...</span>
-                )}
+                <span className="text-emerald-400">●</span>
+                <span className="text-slate-400">
+                  Gemini 2.0 Flash • {isAdmin ? "Admin" : "User"} Mode
+                </span>
               </div>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Role badge */}
           <span
             className={`hidden sm:inline-flex px-3 py-1 rounded-lg text-xs font-medium ${
               isAdmin
@@ -263,7 +259,7 @@ function AgentChatInterface({ isAdmin, user }) {
           >
             {isAdmin ? "👑 Admin Access" : "👤 User Access"}
           </span>
-          {messages.length > 0 && (
+          {messages.length > 1 && (
             <button
               onClick={clearChat}
               className="px-4 py-2 text-sm text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all flex items-center gap-2"
@@ -290,123 +286,41 @@ function AgentChatInterface({ isAdmin, user }) {
       {/* Chat Area */}
       <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
         {showWelcome ? (
-          /* Welcome Screen */
-          <div className="h-full flex flex-col items-center justify-center px-4 py-8">
-            <div className="relative mb-8">
-              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-700 flex items-center justify-center text-4xl shadow-2xl shadow-purple-500/30">
-                🤖
-              </div>
-              <div className="absolute -inset-2 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-3xl blur-xl opacity-20 animate-pulse"></div>
-            </div>
-
-            <h2 className="text-3xl font-bold text-white mb-3 text-center">
-              {isAdmin ? "Admin Database Assistant" : "Voter Search Assistant"}
-            </h2>
-            <p className="text-slate-400 text-center max-w-lg mb-2 text-base">
-              {isAdmin
-                ? "Full database access. Ask anything about voters, sessions, and statistics."
-                : "Search and explore voter data within your assigned permissions."}
-            </p>
-            <p className="text-slate-500 text-sm mb-10">
-              Powered by AI • Natural language queries
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl w-full px-4">
-              {promptsToShow.map((prompt, i) => (
-                <button
-                  key={i}
-                  onClick={() => sendMessage(prompt.text)}
-                  className="group p-5 bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-purple-500/40 rounded-2xl text-left transition-all duration-300 hover:shadow-xl hover:shadow-purple-500/5 hover:-translate-y-0.5"
-                >
-                  <span className="text-2xl mb-3 block group-hover:scale-110 transition-transform inline-block">
-                    {prompt.icon}
-                  </span>
-                  <span className="text-sm text-slate-300 group-hover:text-white transition-colors leading-relaxed block">
-                    {prompt.text}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {!isAdmin && (
-              <p className="mt-10 text-xs text-slate-500 text-center max-w-md">
-                💡 Your searches are limited to your assigned regions and
-                permissions. Contact an admin for extended access.
-              </p>
-            )}
-          </div>
+          <WelcomeScreen
+            user={user}
+            isAdmin={isAdmin}
+            quickActions={quickActions}
+            onActionClick={handleQuickReply}
+            messages={messages}
+          />
         ) : (
-          /* Messages */
           <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
             {messages.map((msg, i) => (
-              <MessageBubble key={i} message={msg} isAdmin={isAdmin} />
+              <MessageBubble
+                key={i}
+                message={msg}
+                isAdmin={isAdmin}
+                onQuickReply={handleQuickReply}
+              />
             ))}
 
-            {loading && (
-              <div className="flex gap-4">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-lg flex-shrink-0 shadow-lg shadow-purple-500/20">
-                  🤖
-                </div>
-                <div className="flex items-center gap-2 pt-3">
-                  <div className="flex gap-1">
-                    <span
-                      className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0ms" }}
-                    ></span>
-                    <span
-                      className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "150ms" }}
-                    ></span>
-                    <span
-                      className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "300ms" }}
-                    ></span>
-                  </div>
-                  <span className="text-xs text-slate-500 ml-2">
-                    Thinking...
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {pendingConfirmation && !loading && (
-              <div className="flex justify-center gap-3 py-4">
-                <button
-                  onClick={() => sendMessage("yes")}
-                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all text-sm font-medium shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5"
-                >
-                  ✓ Confirm
-                </button>
-                <button
-                  onClick={() => sendMessage("no")}
-                  className="px-6 py-2.5 bg-white/5 text-slate-200 rounded-xl hover:bg-white/10 transition-all text-sm font-medium border border-white/10 hover:border-white/20"
-                >
-                  ✕ Cancel
-                </button>
-              </div>
-            )}
+            {isTyping && <TypingIndicator />}
 
             <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
-      {/* Input Area - Fixed at bottom */}
+      {/* Input Area */}
       <div className="flex-shrink-0 border-t border-white/5 bg-black/30 backdrop-blur-xl p-4 md:p-6">
-        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative">
+        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
           <div className="relative group">
             <input
               ref={inputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={
-                pendingConfirmation
-                  ? "Type yes to confirm or no to cancel..."
-                  : isAdmin
-                  ? "Ask anything about the voter database..."
-                  : "Search for voters or ask a question..."
-              }
+              placeholder="Ask me anything about voters..."
               disabled={loading}
               className="w-full px-5 py-4 pr-14 bg-white/[0.05] border border-white/10 rounded-2xl text-white placeholder-slate-500 focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 focus:outline-none focus:bg-white/[0.07] disabled:opacity-50 transition-all text-sm"
             />
@@ -415,57 +329,168 @@ function AgentChatInterface({ isAdmin, user }) {
               disabled={loading || !input.trim()}
               className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 disabled:from-slate-600 disabled:to-slate-700 disabled:cursor-not-allowed text-white rounded-xl transition-all flex items-center justify-center shadow-lg shadow-purple-500/20 disabled:shadow-none"
             >
-              <svg
-                className={`w-5 h-5 ${loading ? "animate-pulse" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 12h14M12 5l7 7-7 7"
-                />
-              </svg>
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+              ) : (
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 12h14M12 5l7 7-7 7"
+                  />
+                </svg>
+              )}
             </button>
           </div>
-          <p className="text-center text-xs text-slate-600 mt-3">
-            AI can make mistakes. Verify important information.
-          </p>
+          <div className="flex items-center justify-center gap-4 mt-3">
+            <p className="text-xs text-slate-600">
+              Powered by Gemini AI • Press Enter to send
+            </p>
+          </div>
         </form>
       </div>
     </div>
   );
 }
 
-function MessageBubble({ message, isAdmin }) {
-  const { role, content, data, queryInfo, executionTime, rowCount, type } =
-    message;
+function WelcomeScreen({
+  user,
+  isAdmin,
+  quickActions,
+  onActionClick,
+  messages,
+}) {
+  return (
+    <div className="h-full flex flex-col items-center justify-center px-4 py-8">
+      {/* Hero Section */}
+      <div className="relative mb-8">
+        <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-700 flex items-center justify-center text-5xl shadow-2xl shadow-purple-500/30">
+          🤖
+        </div>
+        <div className="absolute -inset-4 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-[2rem] blur-2xl opacity-20 animate-pulse"></div>
+        <div className="absolute bottom-0 right-0 w-6 h-6 bg-emerald-400 rounded-full border-4 border-[#0f1528] flex items-center justify-center">
+          <span className="text-xs">✓</span>
+        </div>
+      </div>
+
+      <h2 className="text-3xl md:text-4xl font-bold text-white mb-3 text-center">
+        Your Smart Voter Assistant
+      </h2>
+      <p className="text-slate-400 text-center max-w-lg mb-2 text-base md:text-lg">
+        {isAdmin
+          ? "Full database access with admin privileges. Ask anything!"
+          : "Search, find, and manage voter information with ease."}
+      </p>
+
+      {/* Show welcome message content */}
+      {messages.length > 0 && messages[0].content && (
+        <div className="max-w-2xl w-full mt-6 p-6 bg-white/[0.03] border border-white/[0.06] rounded-2xl">
+          <div className="prose prose-sm prose-invert max-w-none">
+            <ReactMarkdown
+              components={{
+                h1: ({ children }) => (
+                  <h1 className="text-xl font-bold text-white mb-4">
+                    {children}
+                  </h1>
+                ),
+                h2: ({ children }) => (
+                  <h2 className="text-lg font-semibold text-purple-300 mb-3 mt-4">
+                    {children}
+                  </h2>
+                ),
+                p: ({ children }) => (
+                  <p className="text-slate-300 text-sm mb-2">{children}</p>
+                ),
+                strong: ({ children }) => (
+                  <strong className="text-white font-semibold">
+                    {children}
+                  </strong>
+                ),
+                table: ({ children }) => (
+                  <table className="w-full text-sm my-4">{children}</table>
+                ),
+                th: ({ children }) => (
+                  <th className="px-3 py-2 bg-white/5 text-left text-purple-300 font-medium rounded-t-lg">
+                    {children}
+                  </th>
+                ),
+                td: ({ children }) => (
+                  <td className="px-3 py-2 text-slate-300 border-t border-white/5">
+                    {children}
+                  </td>
+                ),
+                hr: () => <hr className="border-white/10 my-4" />,
+              }}
+            >
+              {messages[0].content}
+            </ReactMarkdown>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Actions Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-w-3xl w-full mt-8 px-4">
+        {quickActions.map((action, i) => (
+          <button
+            key={i}
+            onClick={() => onActionClick(action.action)}
+            className="group p-4 bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-purple-500/40 rounded-xl text-center transition-all duration-300 hover:shadow-xl hover:shadow-purple-500/5 hover:-translate-y-0.5"
+          >
+            <span className="text-2xl mb-2 block group-hover:scale-110 transition-transform">
+              {action.icon}
+            </span>
+            <span className="text-xs text-slate-300 group-hover:text-white transition-colors">
+              {action.label}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Tips */}
+      <div className="mt-10 max-w-xl text-center">
+        <p className="text-xs text-slate-500">
+          💡 <strong className="text-slate-400">Pro tip:</strong> You can ask in
+          natural language like "Find me all female voters from Rajarhat"
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({ message, isAdmin, onQuickReply }) {
+  const { role, content, type, data, timestamp } = message;
   const isUser = role === "user";
   const isError = type === "error";
 
   return (
-    <div className={`flex gap-4 ${isUser ? "flex-row-reverse" : ""}`}>
+    <div
+      className={`flex gap-4 ${isUser ? "flex-row-reverse" : ""} animate-fadeIn`}
+    >
+      {/* Avatar */}
       <div
-        className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 shadow-lg ${
+        className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 shadow-lg mt-1 ${
           isUser
             ? "bg-gradient-to-br from-slate-600 to-slate-700"
             : isError
-            ? "bg-gradient-to-br from-red-500 to-rose-600 shadow-red-500/20"
-            : "bg-gradient-to-br from-purple-500 to-indigo-600 shadow-purple-500/20"
+              ? "bg-gradient-to-br from-red-500 to-rose-600 shadow-red-500/20"
+              : "bg-gradient-to-br from-purple-500 to-indigo-600 shadow-purple-500/20"
         }`}
       >
         {isUser ? "👤" : isError ? "⚠️" : "🤖"}
       </div>
 
+      {/* Message Content */}
       <div className={`flex-1 min-w-0 ${isUser ? "flex justify-end" : ""}`}>
         <div
           className={`inline-block max-w-full ${
             isUser
               ? "bg-gradient-to-r from-purple-600 to-purple-700 text-white px-5 py-3 rounded-2xl rounded-tr-md shadow-lg shadow-purple-500/10"
-              : isError
-              ? "bg-red-500/10 border border-red-500/20 px-5 py-3 rounded-2xl"
               : ""
           }`}
         >
@@ -473,18 +498,30 @@ function MessageBubble({ message, isAdmin }) {
             <p className="text-sm leading-relaxed">{content}</p>
           ) : (
             <div className="space-y-4">
+              {/* Markdown Content */}
               <div
-                className={`prose prose-sm prose-invert max-w-none ${
-                  isError ? "text-red-300" : ""
-                }`}
+                className={`prose prose-sm prose-invert max-w-none ${isError ? "text-red-300" : ""}`}
               >
                 <ReactMarkdown
                   components={{
+                    h1: ({ children }) => (
+                      <h1 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                        {children}
+                      </h1>
+                    ),
+                    h2: ({ children }) => (
+                      <h2 className="text-lg font-semibold text-purple-300 mb-2 mt-4">
+                        {children}
+                      </h2>
+                    ),
+                    h3: ({ children }) => (
+                      <h3 className="text-base font-medium text-slate-200 mb-2 mt-3">
+                        {children}
+                      </h3>
+                    ),
                     p: ({ children }) => (
                       <p
-                        className={`text-sm leading-relaxed mb-2 last:mb-0 ${
-                          isError ? "text-red-300" : "text-slate-200"
-                        }`}
+                        className={`text-sm leading-relaxed mb-2 last:mb-0 ${isError ? "text-red-300" : "text-slate-200"}`}
                       >
                         {children}
                       </p>
@@ -495,7 +532,7 @@ function MessageBubble({ message, isAdmin }) {
                       </strong>
                     ),
                     em: ({ children }) => (
-                      <em className="text-purple-300">{children}</em>
+                      <em className="text-purple-300 not-italic">{children}</em>
                     ),
                     ul: ({ children }) => (
                       <ul className="list-disc list-inside space-y-1 text-slate-300 text-sm my-2">
@@ -510,9 +547,28 @@ function MessageBubble({ message, isAdmin }) {
                     li: ({ children }) => (
                       <li className="text-slate-300">{children}</li>
                     ),
+                    table: ({ children }) => (
+                      <div className="overflow-x-auto my-4 rounded-xl border border-white/10">
+                        <table className="min-w-full text-sm">{children}</table>
+                      </div>
+                    ),
+                    thead: ({ children }) => (
+                      <thead className="bg-white/5">{children}</thead>
+                    ),
+                    th: ({ children }) => (
+                      <th className="px-4 py-2 text-left text-purple-300 font-medium whitespace-nowrap">
+                        {children}
+                      </th>
+                    ),
+                    td: ({ children }) => (
+                      <td className="px-4 py-2 text-slate-300 border-t border-white/5">
+                        {children}
+                      </td>
+                    ),
+                    hr: () => <hr className="border-white/10 my-4" />,
                     code: ({ inline, children }) =>
                       inline ? (
-                        <code className="px-1.5 py-0.5 bg-white/10 rounded text-purple-300 text-xs font-mono">
+                        <code className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-mono">
                           {children}
                         </code>
                       ) : (
@@ -528,87 +584,177 @@ function MessageBubble({ message, isAdmin }) {
                 </ReactMarkdown>
               </div>
 
-              {data && data.length > 0 && <DataTable data={data} />}
+              {/* Voter Cards */}
+              {data?.voters && data.voters.length > 0 && (
+                <VoterCardList
+                  voters={data.voters}
+                  onQuickReply={onQuickReply}
+                />
+              )}
 
-              {(executionTime || rowCount !== undefined) && (
-                <div className="flex gap-4 text-xs text-slate-500 pt-1">
-                  {rowCount !== undefined && (
-                    <span className="flex items-center gap-1">
-                      <span>📊</span> {rowCount.toLocaleString()} rows
-                    </span>
-                  )}
-                  {executionTime && (
-                    <span className="flex items-center gap-1">
-                      <span>⚡</span> {executionTime}ms
-                    </span>
-                  )}
+              {/* Single Voter Detail */}
+              {data?.voterDetail && (
+                <VoterDetailCard
+                  voter={data.voterDetail}
+                  onQuickReply={onQuickReply}
+                />
+              )}
+
+              {/* Quick Replies */}
+              {data?.showQuickReplies && data.showQuickReplies.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {data.showQuickReplies.map((reply, i) => (
+                    <button
+                      key={i}
+                      onClick={() => onQuickReply(reply)}
+                      className="px-3 py-1.5 text-xs bg-white/5 hover:bg-purple-500/20 text-slate-300 hover:text-purple-300 border border-white/10 hover:border-purple-500/30 rounded-lg transition-all"
+                    >
+                      {reply}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
           )}
+        </div>
+
+        {/* Timestamp */}
+        <div
+          className={`text-[10px] text-slate-600 mt-1 ${isUser ? "text-right" : ""}`}
+        >
+          {timestamp?.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
         </div>
       </div>
     </div>
   );
 }
 
-function DataTable({ data }) {
-  const [expanded, setExpanded] = useState(false);
-  if (!data || data.length === 0) return null;
-
-  const columns = Object.keys(data[0]);
-  const displayData = expanded ? data : data.slice(0, 5);
-
+function VoterCardList({ voters, onQuickReply }) {
   return (
-    <div className="rounded-xl border border-white/10 overflow-hidden bg-black/20">
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-xs">
-          <thead className="bg-white/5">
-            <tr>
-              {columns.map((col) => (
-                <th
-                  key={col}
-                  className="px-4 py-3 text-left font-medium text-slate-300 whitespace-nowrap uppercase tracking-wider text-[10px]"
-                >
-                  {col.replace(/_/g, " ")}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {displayData.map((row, idx) => (
-              <tr key={idx} className="hover:bg-white/[0.03] transition-colors">
-                {columns.map((col) => (
-                  <td
-                    key={col}
-                    className="px-4 py-3 text-slate-300 whitespace-nowrap"
-                  >
-                    {formatValue(row[col])}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {data.length > 5 && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full py-3 text-xs text-purple-400 hover:text-purple-300 bg-white/[0.02] hover:bg-white/[0.05] transition-all font-medium"
+    <div className="space-y-2">
+      {voters.map((voter, i) => (
+        <div
+          key={i}
+          className="p-4 bg-white/[0.03] border border-white/10 rounded-xl hover:bg-white/[0.05] transition-all cursor-pointer group"
+          onClick={() => onQuickReply(`Show details of voter ${voter.voterId}`)}
         >
-          {expanded ? "↑ Show less" : `↓ Show all ${data.length} rows`}
-        </button>
-      )}
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500/20 to-indigo-500/20 border border-purple-500/30 flex items-center justify-center">
+              <span className="text-lg">👤</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-semibold text-white truncate group-hover:text-purple-300 transition-colors">
+                {voter.name}
+              </h4>
+              <div className="flex flex-wrap gap-2 mt-1">
+                <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded">
+                  {voter.voterId}
+                </span>
+                <span className="text-xs text-slate-400">
+                  {voter.age} yrs • {voter.gender}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1 truncate">
+                📍 {voter.assembly} • Part {voter.partNumber}
+              </p>
+            </div>
+            <div className="text-slate-500 group-hover:text-purple-400 transition-colors">
+              →
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-function formatValue(value) {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "number") return value.toLocaleString();
-  if (typeof value === "boolean") return value ? "✓" : "✕";
-  return String(value);
+function VoterDetailCard({ voter, onQuickReply }) {
+  return (
+    <div className="p-5 bg-gradient-to-br from-purple-500/10 to-indigo-500/10 border border-purple-500/20 rounded-xl">
+      <div className="flex items-start gap-4">
+        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500/30 to-indigo-500/30 border-2 border-purple-500/50 flex items-center justify-center flex-shrink-0">
+          <span className="text-2xl">👤</span>
+        </div>
+        <div className="flex-1">
+          <h3 className="text-lg font-bold text-white">{voter.name}</h3>
+          <p className="text-purple-300 font-mono text-sm">{voter.voterId}</p>
+
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4 text-sm">
+            <div>
+              <span className="text-slate-500">Father/Husband:</span>
+              <span className="text-slate-300 ml-2">
+                {voter.fatherName || "—"}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500">Age:</span>
+              <span className="text-slate-300 ml-2">{voter.age} years</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Gender:</span>
+              <span className="text-slate-300 ml-2 capitalize">
+                {voter.gender}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500">Part No:</span>
+              <span className="text-slate-300 ml-2">{voter.partNumber}</span>
+            </div>
+            <div className="col-span-2">
+              <span className="text-slate-500">Assembly:</span>
+              <span className="text-slate-300 ml-2">{voter.assembly}</span>
+            </div>
+          </div>
+
+          <div className="flex gap-2 mt-4">
+            <button
+              onClick={() => onQuickReply("Print voter slip")}
+              className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              🖨️ Print Slip
+            </button>
+            <button
+              onClick={() => onQuickReply("Search another voter")}
+              className="px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-sm transition-colors"
+            >
+              Search Another
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-// Override layout for this page - full screen experience
+function TypingIndicator() {
+  return (
+    <div className="flex gap-4">
+      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-lg flex-shrink-0 shadow-lg shadow-purple-500/20">
+        🤖
+      </div>
+      <div className="flex items-center gap-2 pt-3">
+        <div className="flex gap-1">
+          <span
+            className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
+            style={{ animationDelay: "0ms" }}
+          ></span>
+          <span
+            className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
+            style={{ animationDelay: "150ms" }}
+          ></span>
+          <span
+            className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"
+            style={{ animationDelay: "300ms" }}
+          ></span>
+        </div>
+        <span className="text-xs text-slate-500 ml-2">AI is thinking...</span>
+      </div>
+    </div>
+  );
+}
+
+// Override layout for this page
 AgentPage.getLayout = (page) => page;

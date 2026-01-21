@@ -853,11 +853,11 @@ label {
 }
 
 .voter-photo-section {
-  @apply flex items-center justify-center;
+  @apply flex items-center justify-center mt-2;
 }
 
 .poll-date-section {
-  @apply text-center space-y-1 text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200 w-full;
+  @apply text-center space-y-1 text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200 w-full mt-2;
 }
 
 .poll-label {
@@ -936,6 +936,22 @@ label {
   50% {
     opacity: 0.3;
   }
+}
+
+/* AI Agent animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out forwards;
 }
 
 .slip-value-highlight {
