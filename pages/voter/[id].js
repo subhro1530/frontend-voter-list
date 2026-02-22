@@ -254,6 +254,9 @@ function VoterDetailContent() {
                 icon="🏢"
               />
             )}
+            {voter.booth_name && (
+              <InfoItem label="Booth Name" value={voter.booth_name} icon="🏢" />
+            )}
           </div>
         </div>
 

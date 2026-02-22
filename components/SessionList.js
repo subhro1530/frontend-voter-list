@@ -44,10 +44,10 @@ export default function SessionList() {
         const list = Array.isArray(res?.sessions)
           ? res.sessions
           : Array.isArray(res?.data)
-          ? res.data
-          : Array.isArray(res)
-          ? res
-          : null;
+            ? res.data
+            : Array.isArray(res)
+              ? res
+              : null;
 
         if (!Array.isArray(list)) {
           setSessions([]);
@@ -57,15 +57,15 @@ export default function SessionList() {
 
         setSessions(list);
         const processing = list.filter((s) =>
-          (s?.status || "").toLowerCase().includes("process")
+          (s?.status || "").toLowerCase().includes("process"),
         );
         if (processing.length) {
           Promise.all(
             processing.map((s) =>
               getSessionStatus(s.id)
                 .then((payload) => ({ id: s.id, payload }))
-                .catch(() => null)
-            )
+                .catch(() => null),
+            ),
           ).then((results) => {
             const next = {};
             results.filter(Boolean).forEach(({ id, payload }) => {
@@ -85,7 +85,7 @@ export default function SessionList() {
   // Auto-refresh every 5 seconds for processing sessions
   useEffect(() => {
     const hasProcessing = sessions.some((s) =>
-      (s?.status || "").toLowerCase().includes("process")
+      (s?.status || "").toLowerCase().includes("process"),
     );
     if (!hasProcessing) return;
 
@@ -196,6 +196,12 @@ export default function SessionList() {
                   {statusIcon(s.status)} {s.status || "pending"}
                 </span>
               </div>
+              {s.booth_name && (
+                <p className="text-sm text-slate-400">
+                  🏢 Booth:{" "}
+                  <span className="text-slate-200">{s.booth_name}</span>
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-2 text-sm text-slate-300">
                 <div>
                   Pages:{" "}

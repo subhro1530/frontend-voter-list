@@ -145,6 +145,12 @@ export default function Layout({ children }) {
                           {t("Stats")}
                         </NavLink>
                         <NavLink
+                          href="/admin/election-results"
+                          tooltip="View & manage election result sessions"
+                        >
+                          📊 {t("Elections")}
+                        </NavLink>
+                        <NavLink
                           href="/agent"
                           tooltip="Ask AI questions about your data"
                           className="bg-purple-600/20 border-purple-500/50"
@@ -344,6 +350,9 @@ export default function Layout({ children }) {
                       </MobileNavLink>
                       <MobileNavLink href="/admin/stats">
                         {t("Stats")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/admin/election-results">
+                        📊 {t("Elections")}
                       </MobileNavLink>
                       <MobileNavLink href="/agent">
                         🤖 {t("Agent")}
