@@ -108,7 +108,6 @@ export default function AffidavitDetail() {
     { key: "overview", label: "Overview", icon: "📋" },
     { key: "fields", label: "Extracted Fields", icon: "📝" },
     { key: "tables", label: "Tables", icon: "📊" },
-    { key: "raw", label: "Raw OCR", icon: "📃" },
   ];
 
   return (
@@ -346,33 +345,6 @@ export default function AffidavitDetail() {
                   </motion.div>
                 );
               })
-            )}
-          </div>
-        )}
-
-        {/* Tab: Raw OCR */}
-        {activeTab === "raw" && (
-          <div className="space-y-4">
-            {(data.pages || []).length === 0 ? (
-              <div className="text-center py-16 text-slate-400">
-                No OCR data available.
-              </div>
-            ) : (
-              (data.pages || []).map((page) => (
-                <motion.div
-                  key={page.page_number}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="card"
-                >
-                  <h3 className="text-slate-100 font-semibold mb-3">
-                    Page {page.page_number}
-                  </h3>
-                  <pre className="text-xs text-slate-400 whitespace-pre-wrap font-mono max-h-[400px] overflow-y-auto bg-ink-50 rounded-lg p-4 border border-ink-400">
-                    {page.raw_text || "(no text)"}
-                  </pre>
-                </motion.div>
-              ))
             )}
           </div>
         )}
