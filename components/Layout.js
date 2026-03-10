@@ -151,6 +151,13 @@ export default function Layout({ children }) {
                           📊 {t("Elections")}
                         </NavLink>
                         <NavLink
+                          href="/affidavits"
+                          tooltip="Scan affidavits & nomination papers with OCR"
+                          className="bg-emerald-600/15 border-emerald-500/40"
+                        >
+                          📋 {t("Affidavits")}
+                        </NavLink>
+                        <NavLink
                           href="/agent"
                           tooltip="Ask AI questions about your data"
                           className="bg-purple-600/20 border-purple-500/50"
@@ -373,6 +380,9 @@ export default function Layout({ children }) {
                       </MobileNavLink>
                       <MobileNavLink href="/admin/election-results">
                         📊 {t("Elections")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/affidavits">
+                        📋 {t("Affidavits")}
                       </MobileNavLink>
                       <MobileNavLink href="/agent">
                         🤖 {t("Agent")}
