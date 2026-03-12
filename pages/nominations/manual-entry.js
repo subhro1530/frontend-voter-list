@@ -47,6 +47,10 @@ export default function NominationManualEntryPage() {
 
   // Header
   const [state, setState] = useState("");
+  const [candidatePhotoUrl, setCandidatePhotoUrl] = useState("");
+  const [candidateSignatureUrl, setCandidateSignatureUrl] = useState("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadingSignature, setUploadingSignature] = useState(false);
 
   // Part I — Recognised Party Nomination
   const [partI_constituency, setPartI_constituency] = useState("");
@@ -129,6 +133,10 @@ export default function NominationManualEntryPage() {
   const [disqualification_10A, setDisqualification_10A] = useState("No");
   const [section10A_date, setSection10A_date] = useState("");
 
+  // Part IIIA — Place & Date
+  const [partIIIA_place, setPartIIIA_place] = useState("");
+  const [partIIIA_date, setPartIIIA_date] = useState("");
+
   // Part IV — RO Record
   const [partIV_serialNo, setPartIV_serialNo] = useState("");
   const [partIV_hour, setPartIV_hour] = useState("");
@@ -193,6 +201,9 @@ export default function NominationManualEntryPage() {
   // ── Populate form from loaded data ──
   function populateForm(d) {
     if (d.state) setState(d.state);
+    if (d.candidatePhotoUrl) setCandidatePhotoUrl(d.candidatePhotoUrl);
+    if (d.candidateSignatureUrl)
+      setCandidateSignatureUrl(d.candidateSignatureUrl);
     // Part I
     if (d.partI_constituency) setPartI_constituency(d.partI_constituency);
     if (d.partI_candidateName) setPartI_candidateName(d.partI_candidateName);
@@ -284,6 +295,8 @@ export default function NominationManualEntryPage() {
       setManagingAgent_details(d.managingAgent_details);
     if (d.disqualification_10A) setDisqualification_10A(d.disqualification_10A);
     if (d.section10A_date) setSection10A_date(d.section10A_date);
+    if (d.partIIIA_place) setPartIIIA_place(d.partIIIA_place);
+    if (d.partIIIA_date) setPartIIIA_date(d.partIIIA_date);
     // Part IV
     if (d.partIV_serialNo) setPartIV_serialNo(d.partIV_serialNo);
     if (d.partIV_hour) setPartIV_hour(d.partIV_hour);
@@ -309,6 +322,8 @@ export default function NominationManualEntryPage() {
   function buildPayload() {
     const payload = {
       state,
+      candidatePhotoUrl,
+      candidateSignatureUrl,
       // Derive top-level fields for session listing
       candidateName: partI_candidateName || partII_candidateName || "",
       fatherMotherHusbandName: partI_fatherName || partII_fatherName || "",
@@ -406,6 +421,9 @@ export default function NominationManualEntryPage() {
         managingAgent === "Yes" ? managingAgent_details : "",
       disqualification_10A,
       section10A_date: disqualification_10A === "Yes" ? section10A_date : "",
+      // Part IIIA — Place & Date
+      partIIIA_place,
+      partIIIA_date,
       // Part IV
       partIV_serialNo,
       partIV_hour,
@@ -428,6 +446,27 @@ export default function NominationManualEntryPage() {
     };
     if (sessionId) payload.sessionId = sessionId;
     return payload;
+  }
+
+  // ── Image upload handler ──
+  async function handleImageUpload(file, fieldName) {
+    if (!file) return;
+    const isPhoto = fieldName === "candidatePhotoUrl";
+    if (isPhoto) setUploadingPhoto(true);
+    else setUploadingSignature(true);
+    try {
+      const res = await nominationAPI.uploadImage(file);
+      if (res.url) {
+        if (isPhoto) setCandidatePhotoUrl(res.url);
+        else setCandidateSignatureUrl(res.url);
+        toast.success(`${isPhoto ? "Photo" : "Signature"} uploaded!`);
+      }
+    } catch (err) {
+      toast.error("Upload failed: " + (err.message || ""));
+    } finally {
+      if (isPhoto) setUploadingPhoto(false);
+      else setUploadingSignature(false);
+    }
   }
 
   // ── Save ──
@@ -574,6 +613,28 @@ export default function NominationManualEntryPage() {
                 placeholder='e.g. "WEST BENGAL"'
                 value={state}
                 onChange={setState}
+              />
+            </div>
+
+            {/* Image Uploads */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 border-t border-ink-400 pt-4">
+              <ImageUploadField
+                label="Candidate Photograph"
+                value={candidatePhotoUrl}
+                uploading={uploadingPhoto}
+                onFileSelect={(file) =>
+                  handleImageUpload(file, "candidatePhotoUrl")
+                }
+                onClear={() => setCandidatePhotoUrl("")}
+              />
+              <ImageUploadField
+                label="Candidate Signature"
+                value={candidateSignatureUrl}
+                uploading={uploadingSignature}
+                onFileSelect={(file) =>
+                  handleImageUpload(file, "candidateSignatureUrl")
+                }
+                onClear={() => setCandidateSignatureUrl("")}
               />
             </div>
           </SectionCard>
@@ -1061,6 +1122,26 @@ export default function NominationManualEntryPage() {
             </div>
           </SectionCard>
 
+          {/* ═══ Part IIIA — Place & Date ═══ */}
+          <div id="section-partIIIA-foot" className="card scroll-mt-24">
+            <h3 className="text-sm font-semibold text-slate-200 mb-3">
+              Part IIIA — Place & Date
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field
+                label="Place"
+                value={partIIIA_place}
+                onChange={setPartIIIA_place}
+              />
+              <Field
+                label="Date"
+                value={partIIIA_date}
+                onChange={setPartIIIA_date}
+                placeholder="DD/MM/YYYY"
+              />
+            </div>
+          </div>
+
           {/* ═══ Part IV — Returning Officer's Record ═══ */}
           <SectionCard
             id="partIV"
@@ -1307,6 +1388,75 @@ function TextareaField({
         rows={rows}
         className="w-full"
       />
+    </div>
+  );
+}
+
+function ImageUploadField({ label, value, uploading, onFileSelect, onClear }) {
+  const fileRef = useRef(null);
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-300 mb-1">
+        {label}
+      </label>
+      {value ? (
+        <div className="flex items-start gap-3">
+          <img
+            src={value}
+            alt={label}
+            className="h-24 w-24 object-cover rounded-lg border border-ink-400"
+          />
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-rose-400 hover:text-rose-300 text-xs mt-1"
+          >
+            ✕ Remove
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.[0]) onFileSelect(e.target.files[0]);
+            }}
+          />
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+            className="btn btn-secondary text-sm"
+          >
+            {uploading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                Uploading...
+              </span>
+            ) : (
+              "📷 Upload Image"
+            )}
+          </button>
+          <span className="text-xs text-slate-500">JPEG or PNG, max 5 MB</span>
+        </div>
+      )}
     </div>
   );
 }

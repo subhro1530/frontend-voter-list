@@ -146,11 +146,13 @@ const SECTIONS = [
   { id: "immovable", label: "8. Immovable Assets" },
   { id: "liabilities", label: "9. Liabilities" },
   { id: "govtDues", label: "10. Government Dues" },
+  { id: "disputedLiab", label: "10A. Disputed Liabilities" },
   { id: "govtAccom", label: "11. Govt. Accommodation" },
   { id: "profession", label: "12. Profession & Income" },
   { id: "contracts", label: "13. Contracts with Govt." },
   { id: "education", label: "14. Education" },
   { id: "verification", label: "15. Verification" },
+  { id: "oathCommissioner", label: "16. Oath Commissioner" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -188,6 +190,10 @@ export default function ManualEntryPage() {
   const [socialMedia1, setSocialMedia1] = useState("");
   const [socialMedia2, setSocialMedia2] = useState("");
   const [socialMedia3, setSocialMedia3] = useState("");
+  const [candidatePhotoUrl, setCandidatePhotoUrl] = useState("");
+  const [candidateSignatureUrl, setCandidateSignatureUrl] = useState("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadingSignature, setUploadingSignature] = useState(false);
 
   // Section 3
   const [panEntries, setPanEntries] = useState(
@@ -223,11 +229,19 @@ export default function ManualEntryPage() {
   // Section 10
   const [governmentDues, setGovernmentDues] = useState({});
 
+  // Section 10A
+  const [disputedLiabilities, setDisputedLiabilities] = useState("");
+
   // Section 11
   const [governmentAccommodation, setGovernmentAccommodation] = useState({
     occupied: "No",
     address: "",
     noDues: "No",
+    duesDate: "",
+    rentDues: "",
+    electricityDues: "",
+    waterDues: "",
+    telephoneDues: "",
   });
 
   // Section 12
@@ -253,6 +267,12 @@ export default function ManualEntryPage() {
   // Section 15
   const [verificationPlace, setVerificationPlace] = useState("");
   const [verificationDate, setVerificationDate] = useState("");
+
+  // Section 16
+  const [oathCommissionerName, setOathCommissionerName] = useState("");
+  const [oathCommissionerDesignation, setOathCommissionerDesignation] =
+    useState("");
+  const [oathCommissionerSealNo, setOathCommissionerSealNo] = useState("");
 
   // ── Nav state ──
   const [activeSectionId, setActiveSectionId] = useState("election");
@@ -314,6 +334,9 @@ export default function ManualEntryPage() {
     if (d.socialMedia1) setSocialMedia1(d.socialMedia1);
     if (d.socialMedia2) setSocialMedia2(d.socialMedia2);
     if (d.socialMedia3) setSocialMedia3(d.socialMedia3);
+    if (d.candidatePhotoUrl) setCandidatePhotoUrl(d.candidatePhotoUrl);
+    if (d.candidateSignatureUrl)
+      setCandidateSignatureUrl(d.candidateSignatureUrl);
     if (d.panEntries?.length) {
       setPanEntries(
         d.panEntries.map((e, i) => ({
@@ -340,11 +363,17 @@ export default function ManualEntryPage() {
       });
     if (d.liabilities) setLiabilities(d.liabilities);
     if (d.governmentDues) setGovernmentDues(d.governmentDues);
+    if (d.disputedLiabilities) setDisputedLiabilities(d.disputedLiabilities);
     if (d.governmentAccommodation)
       setGovernmentAccommodation({
         occupied: "No",
         address: "",
         noDues: "No",
+        duesDate: "",
+        rentDues: "",
+        electricityDues: "",
+        waterDues: "",
+        telephoneDues: "",
         ...d.governmentAccommodation,
       });
     if (d.selfProfession) setSelfProfession(d.selfProfession);
@@ -364,6 +393,11 @@ export default function ManualEntryPage() {
       setEducationalQualification(d.educationalQualification);
     if (d.verificationPlace) setVerificationPlace(d.verificationPlace);
     if (d.verificationDate) setVerificationDate(d.verificationDate);
+    if (d.oathCommissionerName) setOathCommissionerName(d.oathCommissionerName);
+    if (d.oathCommissionerDesignation)
+      setOathCommissionerDesignation(d.oathCommissionerDesignation);
+    if (d.oathCommissionerSealNo)
+      setOathCommissionerSealNo(d.oathCommissionerSealNo);
   }
 
   // ── Build payload ──
@@ -386,6 +420,8 @@ export default function ManualEntryPage() {
       socialMedia1,
       socialMedia2,
       socialMedia3,
+      candidatePhotoUrl,
+      candidateSignatureUrl,
       panEntries: panEntries.map(({ label, ...rest }) => rest),
       hasPendingCases,
       pendingCases: hasPendingCases === "Yes" ? pendingCases : [],
@@ -396,6 +432,7 @@ export default function ManualEntryPage() {
       immovableAssets,
       liabilities,
       governmentDues,
+      disputedLiabilities,
       governmentAccommodation,
       selfProfession,
       spouseProfession,
@@ -411,9 +448,33 @@ export default function ManualEntryPage() {
       educationalQualification,
       verificationPlace,
       verificationDate,
+      oathCommissionerName,
+      oathCommissionerDesignation,
+      oathCommissionerSealNo,
     };
     if (sessionId) payload.sessionId = sessionId;
     return payload;
+  }
+
+  // ── Image upload handler ──
+  async function handleImageUpload(file, fieldName) {
+    if (!file) return;
+    const isPhoto = fieldName === "candidatePhotoUrl";
+    if (isPhoto) setUploadingPhoto(true);
+    else setUploadingSignature(true);
+    try {
+      const res = await affidavitAPI.uploadImage(file);
+      if (res.url) {
+        if (isPhoto) setCandidatePhotoUrl(res.url);
+        else setCandidateSignatureUrl(res.url);
+        toast.success(`${isPhoto ? "Photo" : "Signature"} uploaded!`);
+      }
+    } catch (err) {
+      toast.error("Upload failed: " + (err.message || ""));
+    } finally {
+      if (isPhoto) setUploadingPhoto(false);
+      else setUploadingSignature(false);
+    }
   }
 
   // ── Save ──
@@ -656,6 +717,28 @@ export default function ManualEntryPage() {
                 label="Social Media Account (iii)"
                 value={socialMedia3}
                 onChange={setSocialMedia3}
+              />
+            </div>
+
+            {/* Image Uploads */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 border-t border-ink-400 pt-4">
+              <ImageUploadField
+                label="Candidate Photograph"
+                value={candidatePhotoUrl}
+                uploading={uploadingPhoto}
+                onFileSelect={(file) =>
+                  handleImageUpload(file, "candidatePhotoUrl")
+                }
+                onClear={() => setCandidatePhotoUrl("")}
+              />
+              <ImageUploadField
+                label="Deponent Signature"
+                value={candidateSignatureUrl}
+                uploading={uploadingSignature}
+                onFileSelect={(file) =>
+                  handleImageUpload(file, "candidateSignatureUrl")
+                }
+                onClear={() => setCandidateSignatureUrl("")}
               />
             </div>
           </SectionCard>
@@ -1315,6 +1398,21 @@ export default function ManualEntryPage() {
             </div>
           </SectionCard>
 
+          {/* ═══ Section 10A: Disputed Liabilities ═══ */}
+          <SectionCard
+            id="disputedLiab"
+            title="10A. Disputed Liabilities"
+            subtitle="Any liabilities that are disputed by the candidate."
+          >
+            <TextareaField
+              label="Details of disputed liabilities"
+              value={disputedLiabilities}
+              onChange={setDisputedLiabilities}
+              placeholder="Write NIL if no disputed liabilities"
+              rows={4}
+            />
+          </SectionCard>
+
           {/* ═══ Section 11: Government Accommodation ═══ */}
           <SectionCard
             id="govtAccom"
@@ -1377,6 +1475,68 @@ export default function ManualEntryPage() {
                         <option value="Yes">Yes</option>
                       </select>
                     </div>
+                    <AnimatePresence>
+                      {governmentAccommodation.noDues === "No" && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="grid grid-cols-1 md:grid-cols-2 gap-4 border border-ink-400 rounded-xl p-4"
+                        >
+                          <Field
+                            label="Dues payable as on date"
+                            value={governmentAccommodation.duesDate}
+                            onChange={(v) =>
+                              setGovernmentAccommodation((prev) => ({
+                                ...prev,
+                                duesDate: v,
+                              }))
+                            }
+                            placeholder="DD/MM/YYYY"
+                          />
+                          <Field
+                            label="Rent dues (Rs.)"
+                            value={governmentAccommodation.rentDues}
+                            onChange={(v) =>
+                              setGovernmentAccommodation((prev) => ({
+                                ...prev,
+                                rentDues: v,
+                              }))
+                            }
+                          />
+                          <Field
+                            label="Electricity dues (Rs.)"
+                            value={governmentAccommodation.electricityDues}
+                            onChange={(v) =>
+                              setGovernmentAccommodation((prev) => ({
+                                ...prev,
+                                electricityDues: v,
+                              }))
+                            }
+                          />
+                          <Field
+                            label="Water dues (Rs.)"
+                            value={governmentAccommodation.waterDues}
+                            onChange={(v) =>
+                              setGovernmentAccommodation((prev) => ({
+                                ...prev,
+                                waterDues: v,
+                              }))
+                            }
+                          />
+                          <Field
+                            label="Telephone dues (Rs.)"
+                            value={governmentAccommodation.telephoneDues}
+                            onChange={(v) =>
+                              setGovernmentAccommodation((prev) => ({
+                                ...prev,
+                                telephoneDues: v,
+                              }))
+                            }
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1494,6 +1654,32 @@ export default function ManualEntryPage() {
                 value={verificationDate}
                 onChange={setVerificationDate}
                 placeholder="DD/MM/YYYY"
+              />
+            </div>
+          </SectionCard>
+
+          {/* ═══ Section 16: Oath Commissioner / Notary Details ═══ */}
+          <SectionCard
+            id="oathCommissioner"
+            title="16. Oath Commissioner / Notary Details"
+            subtitle="Before me, ____ (Name of the Oath Commissioner / Magistrate / Notary). The affidavit must be sworn before an Oath Commissioner, First Class Magistrate, or Notary Public."
+          >
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field
+                label="Name of Oath Commissioner / Notary"
+                value={oathCommissionerName}
+                onChange={setOathCommissionerName}
+              />
+              <Field
+                label="Designation"
+                value={oathCommissionerDesignation}
+                onChange={setOathCommissionerDesignation}
+                placeholder='e.g. "Notary Public" / "Oath Commissioner"'
+              />
+              <Field
+                label="Seal / Registration No."
+                value={oathCommissionerSealNo}
+                onChange={setOathCommissionerSealNo}
               />
             </div>
           </SectionCard>
@@ -1623,6 +1809,75 @@ function TextareaField({
         rows={rows}
         className="w-full"
       />
+    </div>
+  );
+}
+
+function ImageUploadField({ label, value, uploading, onFileSelect, onClear }) {
+  const fileRef = useRef(null);
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-300 mb-1">
+        {label}
+      </label>
+      {value ? (
+        <div className="flex items-start gap-3">
+          <img
+            src={value}
+            alt={label}
+            className="h-24 w-24 object-cover rounded-lg border border-ink-400"
+          />
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-rose-400 hover:text-rose-300 text-xs mt-1"
+          >
+            ✕ Remove
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.[0]) onFileSelect(e.target.files[0]);
+            }}
+          />
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+            className="btn btn-secondary text-sm"
+          >
+            {uploading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                Uploading...
+              </span>
+            ) : (
+              "📷 Upload Image"
+            )}
+          </button>
+          <span className="text-xs text-slate-500">JPEG or PNG, max 5 MB</span>
+        </div>
+      )}
     </div>
   );
 }
