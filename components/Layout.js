@@ -152,10 +152,17 @@ export default function Layout({ children }) {
                         </NavLink>
                         <NavLink
                           href="/affidavits"
-                          tooltip="Scan affidavits & nomination papers with OCR"
+                          tooltip="Fill Form 26 affidavit manually"
                           className="bg-emerald-600/15 border-emerald-500/40"
                         >
                           📋 {t("Affidavits")}
+                        </NavLink>
+                        <NavLink
+                          href="/nominations"
+                          tooltip="Fill Form 2B nomination paper manually"
+                          className="bg-amber-600/15 border-amber-500/40"
+                        >
+                          📜 {t("Nominations")}
                         </NavLink>
                         <NavLink
                           href="/agent"
@@ -383,6 +390,9 @@ export default function Layout({ children }) {
                       </MobileNavLink>
                       <MobileNavLink href="/affidavits">
                         📋 {t("Affidavits")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/nominations">
+                        📜 {t("Nominations")}
                       </MobileNavLink>
                       <MobileNavLink href="/agent">
                         🤖 {t("Agent")}
