@@ -15,10 +15,13 @@ export default function ElectionResultDetailPage() {
 
 function ElectionResultDetailContent() {
   const router = useRouter();
-  const { id } = router.query;
+  const { id, boothNo } = router.query;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeBoothNo, setActiveBoothNo] = useState("");
+  const [linkedVoterData, setLinkedVoterData] = useState(null);
+  const [linkedVoterLoading, setLinkedVoterLoading] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -28,7 +31,12 @@ function ElectionResultDetailContent() {
 
     electionResultsAPI
       .getSession(id, controller.signal)
-      .then((res) => setData(res))
+      .then((res) => {
+        setData(res);
+        if (boothNo) {
+          setActiveBoothNo(String(boothNo));
+        }
+      })
       .catch((err) => {
         if (err.name !== "AbortError") {
           setError(err.message || "Failed to load election result details");
@@ -37,7 +45,22 @@ function ElectionResultDetailContent() {
       .finally(() => setLoading(false));
 
     return () => controller.abort();
-  }, [id]);
+  }, [id, boothNo]);
+
+  const handleViewVoters = async (targetBoothNo) => {
+    setLinkedVoterLoading(true);
+    try {
+      const payload = await electionResultsAPI.getSessionBoothVoterList(
+        id,
+        targetBoothNo,
+      );
+      setLinkedVoterData(payload);
+    } catch (err) {
+      toast.error(err.message || "Failed to load linked voter list");
+    } finally {
+      setLinkedVoterLoading(false);
+    }
+  };
 
   const handleExport = async () => {
     try {
@@ -51,10 +74,33 @@ function ElectionResultDetailContent() {
 
   if (loading) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-4 border-neon-400 border-t-transparent"></div>
-          <p className="text-slate-300">Loading election result details...</p>
+      <div className="space-y-6">
+        <div className="card animate-pulse space-y-3">
+          <div className="h-6 rounded bg-ink-100 w-1/2" />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="h-12 rounded bg-ink-100" />
+            <div className="h-12 rounded bg-ink-100" />
+            <div className="h-12 rounded bg-ink-100" />
+            <div className="h-12 rounded bg-ink-100" />
+          </div>
+        </div>
+        <div className="card overflow-hidden p-0">
+          <table className="w-full text-sm">
+            <tbody>
+              {[1, 2, 3, 4, 5].map((row) => (
+                <tr
+                  key={row}
+                  className="animate-pulse border-b border-ink-400/20"
+                >
+                  {[1, 2, 3, 4, 5, 6].map((col) => (
+                    <td key={col} className="px-3 py-3">
+                      <div className="h-4 rounded bg-ink-100" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     );
@@ -79,6 +125,9 @@ function ElectionResultDetailContent() {
   if (!data) return null;
 
   const { session, candidates, boothResults, totals } = data;
+  const selectedBooth = boothResults?.find(
+    (booth) => String(booth.booth_no) === String(activeBoothNo),
+  );
   const totalLabels = {
     evm: "EVM Votes",
     postal: "Postal Votes",
@@ -217,6 +266,15 @@ function ElectionResultDetailContent() {
                   <th className="border border-ink-400/40 px-3 py-2 text-center whitespace-nowrap">
                     Tendered
                   </th>
+                  <th className="border border-ink-400/40 px-3 py-2 text-center whitespace-nowrap">
+                    Voter List
+                  </th>
+                  <th className="border border-ink-400/40 px-3 py-2 text-center whitespace-nowrap">
+                    Voter Session
+                  </th>
+                  <th className="border border-ink-400/40 px-3 py-2 text-center whitespace-nowrap">
+                    Action
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -236,7 +294,15 @@ function ElectionResultDetailContent() {
                   return (
                     <tr
                       key={booth.id}
-                      className="border-b border-ink-400/20 hover:bg-ink-100/30 transition-colors"
+                      onClick={() => {
+                        setActiveBoothNo(String(booth.booth_no));
+                        setLinkedVoterData(null);
+                      }}
+                      className={`border-b border-ink-400/20 hover:bg-ink-100/30 transition-colors cursor-pointer ${
+                        String(activeBoothNo) === String(booth.booth_no)
+                          ? "bg-neon-500/10"
+                          : ""
+                      }`}
                     >
                       <td className="border border-ink-400/20 px-3 py-1.5 text-center text-slate-300">
                         {booth.serial_no}
@@ -276,6 +342,34 @@ function ElectionResultDetailContent() {
                       </td>
                       <td className="border border-ink-400/20 px-3 py-1.5 text-center text-slate-400">
                         {booth.tendered_votes}
+                      </td>
+                      <td className="border border-ink-400/20 px-3 py-1.5 text-center text-slate-300">
+                        {booth.has_voter_list ? "Linked" : "Not Linked"}
+                      </td>
+                      <td className="border border-ink-400/20 px-3 py-1.5 text-center text-slate-300">
+                        {booth.voter_session_name ||
+                          booth.voter_booth_name ||
+                          "—"}
+                        {booth.voter_count ? ` (${booth.voter_count})` : ""}
+                      </td>
+                      <td className="border border-ink-400/20 px-3 py-1.5 text-center">
+                        {booth.has_voter_list ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveBoothNo(String(booth.booth_no));
+                              handleViewVoters(booth.booth_no);
+                            }}
+                            className="btn btn-secondary text-xs py-1 px-2"
+                            disabled={linkedVoterLoading}
+                          >
+                            View Voters
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-500">
+                            No link
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -318,11 +412,105 @@ function ElectionResultDetailContent() {
                     <td className="border border-ink-400/20 px-3 py-2 text-center text-neon-100">
                       {t.tendered_votes}
                     </td>
+                    <td
+                      className="border border-ink-400/20 px-3 py-2"
+                      colSpan={3}
+                    />
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Focused Booth Detail */}
+      {selectedBooth && (
+        <div className="card">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <h3 className="text-sm font-semibold text-slate-100">
+              Focused Booth: #{selectedBooth.booth_no}
+            </h3>
+            {selectedBooth.has_voter_list && (
+              <button
+                onClick={() => handleViewVoters(selectedBooth.booth_no)}
+                className="btn btn-secondary text-xs py-1.5 px-3"
+                disabled={linkedVoterLoading}
+              >
+                {linkedVoterLoading ? "Loading voters..." : "View Voters"}
+              </button>
+            )}
+          </div>
+          {!selectedBooth.has_voter_list && (
+            <div className="text-sm text-slate-400">
+              This booth has no linked voter-list session.
+            </div>
+          )}
+          {linkedVoterData &&
+            String(linkedVoterData.boothNo) ===
+              String(selectedBooth.booth_no) && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <div className="p-3 rounded-lg bg-ink-100/40 border border-ink-400/40">
+                    <div className="text-slate-400 text-xs">
+                      Selected Session
+                    </div>
+                    <div className="font-semibold text-slate-100">
+                      {linkedVoterData.selectedSession?.original_filename ||
+                        linkedVoterData.selectedSession?.name ||
+                        "—"}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-ink-100/40 border border-ink-400/40">
+                    <div className="text-slate-400 text-xs">Voters Loaded</div>
+                    <div className="font-semibold text-slate-100">
+                      {linkedVoterData.voters?.length || 0}
+                    </div>
+                  </div>
+                </div>
+                {linkedVoterData.voters?.length > 0 ? (
+                  <div className="overflow-x-auto rounded-lg border border-ink-400/30">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-ink-100/80 text-slate-300 text-xs">
+                          <th className="px-3 py-2 text-left">Name</th>
+                          <th className="px-3 py-2 text-left">Part No</th>
+                          <th className="px-3 py-2 text-left">Serial No</th>
+                          <th className="px-3 py-2 text-left">EPIC</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {linkedVoterData.voters
+                          .slice(0, 20)
+                          .map((voter, index) => (
+                            <tr
+                              key={`${voter.id || voter.epic_no || "v"}-${index}`}
+                              className="border-t border-ink-400/20"
+                            >
+                              <td className="px-3 py-2 text-slate-200">
+                                {voter.elector_name || voter.name || "—"}
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">
+                                {voter.part_no || "—"}
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">
+                                {voter.serial_no || "—"}
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">
+                                {voter.epic_no || voter.epic || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-400">
+                    No voters found for this linked booth.
+                  </div>
+                )}
+              </div>
+            )}
         </div>
       )}
 

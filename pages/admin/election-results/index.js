@@ -4,6 +4,31 @@ import ProtectedRoute from "../../../components/ProtectedRoute";
 import { electionResultsAPI } from "../../../lib/api";
 import toast from "react-hot-toast";
 
+const hasActiveFilters = (filters) =>
+  Boolean(filters.assembly || filters.year || filters.boothNo);
+
+const retryToast = (message, onRetry) => {
+  toast.custom(
+    (t) => (
+      <div className="card max-w-md border border-amber-500/30 bg-amber-900/25">
+        <div className="text-sm text-amber-100">{message}</div>
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={() => {
+              toast.dismiss(t.id);
+              onRetry();
+            }}
+            className="btn btn-secondary text-xs py-1.5 px-3"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    ),
+    { duration: 7000 },
+  );
+};
+
 export default function ElectionResultListPage() {
   return (
     <ProtectedRoute allowedRoles={["admin"]}>
@@ -18,19 +43,27 @@ function ElectionResultListContent() {
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState("");
   const [renameModal, setRenameModal] = useState(null);
+  const [filters, setFilters] = useState({
+    assembly: "",
+    year: "",
+    boothNo: "",
+  });
 
-  const loadSessions = () => {
+  const loadSessions = (nextFilters = filters) => {
     const controller = new AbortController();
     setLoading(true);
     setError("");
     electionResultsAPI
-      .getSessions(controller.signal)
+      .getSessions(nextFilters, controller.signal)
       .then((data) => {
         setSessions(data.sessions || []);
       })
       .catch((err) => {
         if (err.name !== "AbortError") {
-          setError(err.message || "Failed to load election result sessions");
+          const message =
+            err.message || "Failed to load election result sessions";
+          setError(message);
+          retryToast(message, () => loadSessions(nextFilters));
         }
       })
       .finally(() => setLoading(false));
@@ -96,6 +129,16 @@ function ElectionResultListContent() {
     return "📋";
   };
 
+  const applyFilters = () => {
+    loadSessions(filters);
+  };
+
+  const clearFilters = () => {
+    const cleared = { assembly: "", year: "", boothNo: "" };
+    setFilters(cleared);
+    loadSessions(cleared);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -132,15 +175,81 @@ function ElectionResultListContent() {
         </div>
       )}
 
-      {/* Loading */}
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <div className="flex flex-col items-center gap-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-neon-400 border-t-transparent"></div>
-            <p className="text-slate-300">
-              Loading election result sessions...
-            </p>
+      {/* Filters */}
+      <div className="card">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <input
+            type="text"
+            value={filters.assembly}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, assembly: e.target.value }))
+            }
+            placeholder="Assembly"
+            className="px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg text-slate-100 placeholder:text-slate-500"
+          />
+          <input
+            type="number"
+            min="1900"
+            max="2100"
+            value={filters.year}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, year: e.target.value }))
+            }
+            placeholder="Year"
+            className="px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg text-slate-100 placeholder:text-slate-500"
+          />
+          <input
+            type="text"
+            value={filters.boothNo}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, boothNo: e.target.value }))
+            }
+            placeholder="Booth No"
+            className="px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg text-slate-100 placeholder:text-slate-500"
+          />
+          <div className="flex gap-2">
+            <button
+              className="btn btn-primary flex-1"
+              onClick={applyFilters}
+              disabled={loading}
+            >
+              Apply
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={clearFilters}
+              disabled={loading || !hasActiveFilters(filters)}
+            >
+              Clear
+            </button>
           </div>
+        </div>
+      </div>
+
+      {/* Loading */}
+      {loading && sessions.length === 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((item) => (
+            <div key={item} className="card space-y-3 animate-pulse">
+              <div className="h-5 rounded bg-ink-100 w-2/3" />
+              <div className="grid grid-cols-2 gap-2">
+                <div className="h-4 rounded bg-ink-100" />
+                <div className="h-4 rounded bg-ink-100" />
+                <div className="h-4 rounded bg-ink-100" />
+                <div className="h-4 rounded bg-ink-100" />
+              </div>
+              <div className="flex gap-2">
+                <div className="h-8 rounded bg-ink-100 w-20" />
+                <div className="h-8 rounded bg-ink-100 w-20" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {loading && sessions.length > 0 && (
+        <div className="p-3 text-slate-300 card">
+          Refreshing filtered sessions...
         </div>
       )}
 
@@ -149,17 +258,28 @@ function ElectionResultListContent() {
         <div className="card text-center py-12">
           <div className="text-5xl mb-4">📊</div>
           <h3 className="text-lg font-semibold text-slate-100 mb-2">
-            No election results yet
+            {hasActiveFilters(filters)
+              ? "No filtered sessions found"
+              : "No election results yet"}
           </h3>
           <p className="text-slate-400 mb-6">
-            Upload a Form 20 election result PDF to get started.
+            {hasActiveFilters(filters)
+              ? "Try changing Assembly, Year, or Booth filters."
+              : "Upload a Form 20 election result PDF to get started."}
           </p>
-          <Link
-            href="/admin/election-results/upload"
-            className="btn btn-primary inline-flex"
-          >
-            Upload Election Result
-          </Link>
+          <div className="flex justify-center gap-2">
+            {hasActiveFilters(filters) && (
+              <button onClick={clearFilters} className="btn btn-secondary">
+                Clear Filters
+              </button>
+            )}
+            <Link
+              href="/admin/election-results/upload"
+              className="btn btn-primary inline-flex"
+            >
+              Upload Election Result
+            </Link>
+          </div>
         </div>
       )}
 

@@ -7,7 +7,9 @@ import {
   stopSession,
   resumeSession,
   renameSession,
+  electionResultsAPI,
 } from "../lib/api";
+import toast from "react-hot-toast";
 
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
@@ -34,6 +36,14 @@ export default function SessionList() {
   const [actionLoading, setActionLoading] = useState("");
   const [progressMap, setProgressMap] = useState({});
   const [renameModal, setRenameModal] = useState(null);
+  const [linkedResultState, setLinkedResultState] = useState({
+    open: false,
+    loading: false,
+    data: null,
+    error: "",
+    sourceSession: null,
+  });
+  const [linkedYear, setLinkedYear] = useState("");
 
   const load = () => {
     const controller = new AbortController();
@@ -147,6 +157,41 @@ export default function SessionList() {
     }
   };
 
+  const handleViewBoothResult = async (session, overrideYear) => {
+    setLinkedResultState((prev) => ({
+      ...prev,
+      open: true,
+      loading: true,
+      error: "",
+      sourceSession: session,
+    }));
+
+    const yearToUse =
+      overrideYear || linkedYear || session.election_year || session.year || "";
+
+    try {
+      const data =
+        await electionResultsAPI.getLinkedElectionResultsFromVoterSession(
+          session.id,
+          yearToUse,
+        );
+      setLinkedResultState((prev) => ({
+        ...prev,
+        loading: false,
+        data,
+        error: "",
+      }));
+    } catch (err) {
+      const message = err.message || "Failed to fetch linked election results";
+      setLinkedResultState((prev) => ({
+        ...prev,
+        loading: false,
+        error: message,
+      }));
+      toast.error(message);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -191,6 +236,17 @@ export default function SessionList() {
                     </button>
                   </div>
                   <div className="text-xs text-slate-400">ID: {s.id}</div>
+                  {(s.assembly_name || s.constituency) && (
+                    <div className="text-xs text-slate-400">
+                      Assembly: {s.assembly_name || s.constituency}
+                    </div>
+                  )}
+                  {(s.booth_no || s.booth_name) && (
+                    <div className="text-xs text-slate-300">
+                      Booth #{s.booth_no || "—"}
+                      {s.booth_name ? ` • ${s.booth_name}` : ""}
+                    </div>
+                  )}
                 </div>
                 <span className={`badge ${statusTone(s.status)}`}>
                   {statusIcon(s.status)} {s.status || "pending"}
@@ -274,6 +330,12 @@ export default function SessionList() {
                 <Link className="btn btn-primary" href={`/sessions/${s.id}`}>
                   View
                 </Link>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handleViewBoothResult(s)}
+                >
+                  View Booth Result
+                </button>
 
                 {/* Stop button - only for processing sessions */}
                 {canStop && (
@@ -316,6 +378,27 @@ export default function SessionList() {
           session={renameModal}
           onClose={() => setRenameModal(null)}
           onRename={handleRename}
+        />
+      )}
+
+      {linkedResultState.open && (
+        <LinkedElectionResultsModal
+          state={linkedResultState}
+          linkedYear={linkedYear}
+          onYearChange={setLinkedYear}
+          onClose={() =>
+            setLinkedResultState({
+              open: false,
+              loading: false,
+              data: null,
+              error: "",
+              sourceSession: null,
+            })
+          }
+          onRetry={() =>
+            linkedResultState.sourceSession &&
+            handleViewBoothResult(linkedResultState.sourceSession, linkedYear)
+          }
         />
       )}
     </div>
@@ -380,4 +463,247 @@ function normalizeProgress(payload) {
     ? Math.min(100, Math.round((processed / total) * 100))
     : 0;
   return { processed, total, percent };
+}
+
+function normalizeAssembly(value) {
+  return (value || "").toString().trim().toLowerCase();
+}
+
+function LinkedElectionResultsModal({
+  state,
+  linkedYear,
+  onYearChange,
+  onClose,
+  onRetry,
+}) {
+  const totalLabels = {
+    evm: "EVM Votes",
+    postal: "Postal Votes",
+    total: "Total Votes Polled",
+  };
+
+  const sourceAssembly =
+    state.data?.session?.assembly_name ||
+    state.sourceSession?.assembly_name ||
+    state.sourceSession?.constituency ||
+    "";
+
+  const results = state.data?.fullResults || [];
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-ink-200 border border-ink-400 rounded-xl p-4 w-full max-w-6xl shadow-2xl max-h-[90vh] overflow-y-auto space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-slate-100">
+              Linked Booth Result
+            </h3>
+            <p className="text-xs text-slate-400">
+              Booth #
+              {state.data?.session?.booth_no ||
+                state.sourceSession?.booth_no ||
+                "—"}
+              {sourceAssembly ? ` • ${sourceAssembly}` : ""}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 border border-ink-400 rounded-lg text-slate-300 hover:bg-ink-100"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <input
+            type="number"
+            min="1900"
+            max="2100"
+            value={linkedYear}
+            onChange={(e) => onYearChange(e.target.value)}
+            placeholder="Year filter"
+            className="px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg text-slate-100 placeholder:text-slate-500"
+          />
+          <button onClick={onRetry} className="btn btn-secondary">
+            Reload Linked Result
+          </button>
+        </div>
+
+        {state.loading && (
+          <div className="space-y-2 animate-pulse">
+            <div className="h-10 rounded bg-ink-100" />
+            <div className="h-28 rounded bg-ink-100" />
+            <div className="h-28 rounded bg-ink-100" />
+          </div>
+        )}
+
+        {!state.loading && state.error && (
+          <div className="p-3 bg-rose-900/40 text-rose-100 rounded-lg border border-rose-700 flex items-center justify-between gap-3">
+            <span>{state.error}</span>
+            <button
+              className="btn btn-secondary text-xs py-1 px-2"
+              onClick={onRetry}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!state.loading && !state.error && results.length === 0 && (
+          <div className="p-3 text-slate-400 border border-ink-400/40 rounded-lg">
+            No linked election result found for this voter session.
+          </div>
+        )}
+
+        {!state.loading &&
+          !state.error &&
+          results.map((result, index) => {
+            const boothResult = result.boothResult || {};
+            const electionSession = result.electionSession || {};
+            const assemblyMismatch =
+              normalizeAssembly(sourceAssembly) &&
+              normalizeAssembly(
+                electionSession.constituency || electionSession.assembly_name,
+              ) &&
+              normalizeAssembly(sourceAssembly) !==
+                normalizeAssembly(
+                  electionSession.constituency || electionSession.assembly_name,
+                );
+
+            return (
+              <div
+                key={`${electionSession.id || "session"}-${index}`}
+                className="border border-ink-400/40 rounded-lg p-3 space-y-3"
+              >
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="text-sm text-slate-200">
+                    <strong>
+                      {electionSession.constituency || "Election Session"}
+                    </strong>
+                    {electionSession.election_year
+                      ? ` • Year ${electionSession.election_year}`
+                      : ""}
+                    {boothResult.booth_no
+                      ? ` • Booth #${boothResult.booth_no}`
+                      : ""}
+                  </div>
+                  <Link
+                    href={`/admin/election-results/${electionSession.id}?boothNo=${encodeURIComponent(boothResult.booth_no || "")}`}
+                    className="btn btn-secondary text-xs py-1 px-2"
+                  >
+                    Open Booth Row
+                  </Link>
+                </div>
+
+                {assemblyMismatch && (
+                  <div className="p-2 text-xs bg-amber-900/30 border border-amber-600/40 text-amber-100 rounded">
+                    Warning: Linked result assembly differs from voter session
+                    assembly.
+                  </div>
+                )}
+
+                <div className="overflow-x-auto border border-ink-400/30 rounded">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-ink-100/80 text-slate-300 text-xs">
+                        <th className="px-3 py-2 text-left">Booth</th>
+                        <th className="px-3 py-2 text-left">Candidate Votes</th>
+                        <th className="px-3 py-2 text-left">Valid</th>
+                        <th className="px-3 py-2 text-left">Rejected</th>
+                        <th className="px-3 py-2 text-left">NOTA</th>
+                        <th className="px-3 py-2 text-left">Total</th>
+                        <th className="px-3 py-2 text-left">Tendered</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-t border-ink-400/20">
+                        <td className="px-3 py-2 text-slate-100 font-mono">
+                          {boothResult.booth_no || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300">
+                          {Object.entries(boothResult.candidate_votes || {})
+                            .map(([name, votes]) => `${name}: ${votes}`)
+                            .join(" | ") || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300">
+                          {boothResult.total_valid_votes ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300">
+                          {boothResult.rejected_votes ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300">
+                          {boothResult.nota ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300 font-semibold">
+                          {boothResult.total_votes ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300">
+                          {boothResult.tendered_votes ?? "—"}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {Array.isArray(result.candidates) &&
+                  result.candidates.length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {result.candidates.map((candidate, idx) => (
+                        <span
+                          key={`${candidate.id || candidate.candidate_name || idx}`}
+                          className="px-2 py-1 rounded bg-ink-100/40 border border-ink-400/40 text-slate-200"
+                        >
+                          {candidate.candidate_name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                {Array.isArray(result.totals) && result.totals.length > 0 && (
+                  <div className="overflow-x-auto border border-ink-400/30 rounded">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-ink-100/80 text-slate-300">
+                          <th className="px-3 py-2 text-left">Total Type</th>
+                          <th className="px-3 py-2 text-left">Valid</th>
+                          <th className="px-3 py-2 text-left">Rejected</th>
+                          <th className="px-3 py-2 text-left">NOTA</th>
+                          <th className="px-3 py-2 text-left">Total</th>
+                          <th className="px-3 py-2 text-left">Tendered</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.totals.map((row) => (
+                          <tr
+                            key={row.total_type}
+                            className="border-t border-ink-400/20 text-slate-300"
+                          >
+                            <td className="px-3 py-2">
+                              {totalLabels[row.total_type] || row.total_type}
+                            </td>
+                            <td className="px-3 py-2">
+                              {row.total_valid_votes ?? "—"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {row.rejected_votes ?? "—"}
+                            </td>
+                            <td className="px-3 py-2">{row.nota ?? "—"}</td>
+                            <td className="px-3 py-2 font-semibold">
+                              {row.total_votes ?? "—"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {row.tendered_votes ?? "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
 }
