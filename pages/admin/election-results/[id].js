@@ -3,6 +3,10 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import ProtectedRoute from "../../../components/ProtectedRoute";
 import { electionResultsAPI } from "../../../lib/api";
+import {
+  openBoothVoters,
+  switchBoothVoterSession,
+} from "../../../scripts/electionResultsFrontendLinking";
 import toast from "react-hot-toast";
 
 export default function ElectionResultDetailPage() {
@@ -22,6 +26,10 @@ function ElectionResultDetailContent() {
   const [activeBoothNo, setActiveBoothNo] = useState("");
   const [linkedVoterData, setLinkedVoterData] = useState(null);
   const [linkedVoterLoading, setLinkedVoterLoading] = useState(false);
+  const [linkedVoterBoothNo, setLinkedVoterBoothNo] = useState("");
+  const [selectedVoterSessionId, setSelectedVoterSessionId] = useState("");
+  const [switchingVoterSession, setSwitchingVoterSession] = useState(false);
+  const [boothSortOrder, setBoothSortOrder] = useState("asc");
 
   useEffect(() => {
     if (!id) return;
@@ -50,15 +58,58 @@ function ElectionResultDetailContent() {
   const handleViewVoters = async (targetBoothNo) => {
     setLinkedVoterLoading(true);
     try {
-      const payload = await electionResultsAPI.getSessionBoothVoterList(
-        id,
-        targetBoothNo,
-      );
+      const payload = await openBoothVoters({
+        electionResultSessionId: id,
+        boothNo: targetBoothNo,
+        limit: 200,
+      });
       setLinkedVoterData(payload);
+      setLinkedVoterBoothNo(String(targetBoothNo));
+      setSelectedVoterSessionId(
+        String(
+          payload?.selectedSession?.id ||
+            payload?.selectedSession?.sessionId ||
+            payload?.selectedVoterSessionId ||
+            "",
+        ),
+      );
+
+      if (payload?._meta?.retriedWithoutVoterSessionId) {
+        toast("Saved voter session was stale. Loaded with default session.");
+      }
     } catch (err) {
       toast.error(err.message || "Failed to load linked voter list");
     } finally {
       setLinkedVoterLoading(false);
+    }
+  };
+
+  const handleSwitchVoterSession = async () => {
+    if (!selectedBooth || !selectedVoterSessionId) return;
+
+    setSwitchingVoterSession(true);
+    try {
+      const payload = await switchBoothVoterSession({
+        electionResultSessionId: id,
+        boothNo: selectedBooth.booth_no,
+        voterSessionId: selectedVoterSessionId,
+        limit: 200,
+      });
+      setLinkedVoterData(payload);
+      setLinkedVoterBoothNo(String(selectedBooth.booth_no));
+      setSelectedVoterSessionId(
+        String(
+          payload?.selectedSession?.id ||
+            payload?.selectedSession?.sessionId ||
+            payload?.selectedVoterSessionId ||
+            selectedVoterSessionId,
+        ),
+      );
+      toast.success("Voter session switched");
+    } catch (err) {
+      toast.error(err.message || "Failed to switch voter session");
+    } finally {
+      setSwitchingVoterSession(false);
     }
   };
 
@@ -125,9 +176,26 @@ function ElectionResultDetailContent() {
   if (!data) return null;
 
   const { session, candidates, boothResults, totals } = data;
-  const selectedBooth = boothResults?.find(
+  const collator = new Intl.Collator(undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+
+  const sortedBoothResults = [...(boothResults || [])].sort((a, b) => {
+    const aBooth = String(a?.booth_no ?? "").trim();
+    const bBooth = String(b?.booth_no ?? "").trim();
+    const compared = collator.compare(aBooth, bBooth);
+    return boothSortOrder === "asc" ? compared : -compared;
+  });
+
+  const selectedBooth = sortedBoothResults?.find(
     (booth) => String(booth.booth_no) === String(activeBoothNo),
   );
+  const linkedVoterSessions =
+    linkedVoterData?.availableSessions ||
+    linkedVoterData?.voterSessions ||
+    linkedVoterData?.sessions ||
+    [];
   const totalLabels = {
     evm: "EVM Votes",
     postal: "Postal Votes",
@@ -230,8 +298,19 @@ function ElectionResultDetailContent() {
       )}
 
       {/* Results Table */}
-      {boothResults && boothResults.length > 0 && (
+      {sortedBoothResults && sortedBoothResults.length > 0 && (
         <div className="card overflow-hidden p-0">
+          <div className="flex items-center justify-end border-b border-ink-400/30 px-3 py-2">
+            <button
+              type="button"
+              onClick={() =>
+                setBoothSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))
+              }
+              className="btn btn-secondary text-xs py-1 px-2"
+            >
+              Sort Booth: {boothSortOrder === "asc" ? "ASC" : "DESC"}
+            </button>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -278,7 +357,7 @@ function ElectionResultDetailContent() {
                 </tr>
               </thead>
               <tbody>
-                {boothResults.map((booth) => {
+                {sortedBoothResults.map((booth) => {
                   // Find the winner for this booth
                   let maxVotes = -1;
                   let winnerName = "";
@@ -297,6 +376,7 @@ function ElectionResultDetailContent() {
                       onClick={() => {
                         setActiveBoothNo(String(booth.booth_no));
                         setLinkedVoterData(null);
+                        setLinkedVoterBoothNo("");
                       }}
                       className={`border-b border-ink-400/20 hover:bg-ink-100/30 transition-colors cursor-pointer ${
                         String(activeBoothNo) === String(booth.booth_no)
@@ -363,7 +443,14 @@ function ElectionResultDetailContent() {
                             className="btn btn-secondary text-xs py-1 px-2"
                             disabled={linkedVoterLoading}
                           >
-                            View Voters
+                            {linkedVoterLoading ? (
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                Buffering...
+                              </span>
+                            ) : (
+                              "View Voters"
+                            )}
                           </button>
                         ) : (
                           <span className="text-xs text-slate-500">
@@ -437,7 +524,14 @@ function ElectionResultDetailContent() {
                 className="btn btn-secondary text-xs py-1.5 px-3"
                 disabled={linkedVoterLoading}
               >
-                {linkedVoterLoading ? "Loading voters..." : "View Voters"}
+                {linkedVoterLoading ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    Buffering...
+                  </span>
+                ) : (
+                  "View Voters"
+                )}
               </button>
             )}
           </div>
@@ -446,8 +540,16 @@ function ElectionResultDetailContent() {
               This booth has no linked voter-list session.
             </div>
           )}
+          {selectedBooth.has_voter_list && linkedVoterLoading && (
+            <div className="rounded-lg border border-ink-400/40 bg-ink-100/40 p-3 text-sm text-slate-300 mb-3">
+              <div className="inline-flex items-center gap-2">
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-neon-200 border-t-transparent" />
+                Buffering voter list for this booth...
+              </div>
+            </div>
+          )}
           {linkedVoterData &&
-            String(linkedVoterData.boothNo) ===
+            String(linkedVoterBoothNo || linkedVoterData.boothNo || "") ===
               String(selectedBooth.booth_no) && (
               <div className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
@@ -468,6 +570,64 @@ function ElectionResultDetailContent() {
                     </div>
                   </div>
                 </div>
+                {linkedVoterData.selectionSource === "memory" && (
+                  <div className="text-xs text-slate-400">
+                    Opened last used voter session.
+                  </div>
+                )}
+                {linkedVoterSessions.length > 0 && (
+                  <div className="p-3 rounded-lg bg-ink-100/40 border border-ink-400/40 space-y-2">
+                    <div className="text-slate-400 text-xs">
+                      Switch linked voter session
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        className="input w-full sm:w-80"
+                        value={selectedVoterSessionId}
+                        onChange={(e) =>
+                          setSelectedVoterSessionId(
+                            String(e.target.value || ""),
+                          )
+                        }
+                      >
+                        <option value="">Select session</option>
+                        {linkedVoterSessions.map((sessionOption, index) => {
+                          const optionId = String(
+                            sessionOption?.id ||
+                              sessionOption?.sessionId ||
+                              sessionOption?._id ||
+                              "",
+                          );
+                          const optionLabel =
+                            sessionOption?.original_filename ||
+                            sessionOption?.name ||
+                            sessionOption?.session_name ||
+                            (optionId
+                              ? `Session ${optionId.slice(0, 8)}...`
+                              : `Session ${index + 1}`);
+
+                          return (
+                            <option
+                              key={`${optionId || "session"}-${index}`}
+                              value={optionId}
+                            >
+                              {optionLabel}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <button
+                        onClick={handleSwitchVoterSession}
+                        className="btn btn-secondary text-xs py-1.5 px-3"
+                        disabled={
+                          !selectedVoterSessionId || switchingVoterSession
+                        }
+                      >
+                        {switchingVoterSession ? "Switching..." : "Switch"}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {linkedVoterData.voters?.length > 0 ? (
                   <div className="overflow-x-auto rounded-lg border border-ink-400/30">
                     <table className="w-full text-sm">
@@ -515,7 +675,7 @@ function ElectionResultDetailContent() {
       )}
 
       {/* No data */}
-      {(!boothResults || boothResults.length === 0) && !loading && (
+      {(!sortedBoothResults || sortedBoothResults.length === 0) && !loading && (
         <div className="card text-center py-8">
           <p className="text-slate-400">
             No booth results available for this session.
