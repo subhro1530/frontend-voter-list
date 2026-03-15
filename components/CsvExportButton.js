@@ -4,6 +4,7 @@ export default function CsvExportButton({ voters = [], disabled }) {
   const csvContent = useMemo(() => {
     if (!voters.length) return "";
     const headers = [
+      "serial_number",
       "name",
       "voter_id",
       "gender",
@@ -13,7 +14,6 @@ export default function CsvExportButton({ voters = [], disabled }) {
       "part_number",
       "section",
       "assembly",
-      "serial_number",
     ];
     const rows = voters.map((v) =>
       headers
@@ -24,7 +24,7 @@ export default function CsvExportButton({ voters = [], disabled }) {
           }
           return val;
         })
-        .join(",")
+        .join(","),
     );
     return [headers.join(","), ...rows].join("\n");
   }, [voters]);

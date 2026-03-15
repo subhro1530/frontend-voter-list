@@ -32,6 +32,51 @@ const statusIcon = (status) => {
   return "📋";
 };
 
+function getBoothValue(voter) {
+  return (
+    voter?.booth_no ??
+    voter?.boothNo ??
+    voter?.booth_number ??
+    voter?.boothNumber ??
+    voter?.part_number ??
+    voter?.partNumber ??
+    ""
+  );
+}
+
+function compareNumericLike(a, b) {
+  const aNum = Number(a);
+  const bNum = Number(b);
+  const aIsNum = Number.isFinite(aNum);
+  const bIsNum = Number.isFinite(bNum);
+  if (aIsNum && bIsNum) return aNum - bNum;
+  return String(a).localeCompare(String(b), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function sortVotersByBooth(voterList = []) {
+  return [...voterList].sort((a, b) => {
+    const byBooth = compareNumericLike(getBoothValue(a), getBoothValue(b));
+    if (byBooth !== 0) return byBooth;
+
+    const bySerial = compareNumericLike(
+      a?.serial_number ?? "",
+      b?.serial_number ?? "",
+    );
+    if (bySerial !== 0) return bySerial;
+
+    return String(a?.name || "").localeCompare(
+      String(b?.name || ""),
+      undefined,
+      {
+        sensitivity: "base",
+      },
+    );
+  });
+}
+
 export default function SessionDetail() {
   const router = useRouter();
   const { id } = router.query;
@@ -161,7 +206,7 @@ export default function SessionDetail() {
       // Also refresh voters silently if filters are empty
       if (Object.keys(currentFilters).length === 0) {
         getSessionVoters(id, {}, controller.signal)
-          .then((res) => setVoters(res.voters || res))
+          .then((res) => setVoters(sortVotersByBooth(res.voters || res)))
           .catch(() => {}); // Silent fail
       }
     }, 5000); // Poll every 5 seconds
@@ -179,14 +224,14 @@ export default function SessionDetail() {
       setErrorVoters("");
       setCurrentFilters(filters);
       getSessionVoters(id, filters, controller.signal)
-        .then((res) => setVoters(res.voters || res))
+        .then((res) => setVoters(sortVotersByBooth(res.voters || res)))
         .catch((err) => {
           if (err.name === "AbortError") return;
           setErrorVoters(err.message || "Failed to load voters");
         })
         .finally(() => setLoadingVoters(false));
     },
-    [id]
+    [id],
   );
 
   useEffect(() => {
@@ -306,7 +351,7 @@ export default function SessionDetail() {
           {(session?.status || statusInfo?.statusText) && (
             <span
               className={`badge ${statusTone(
-                statusInfo?.statusText || session?.status
+                statusInfo?.statusText || session?.status,
               )}`}
             >
               {statusIcon(statusInfo?.statusText || session?.status)}{" "}
@@ -486,14 +531,14 @@ const RELIGION_ICONS = {
 
 function FilteredStatus({ voterCount, totalCount, filters, religionStats }) {
   const activeFilters = Object.entries(filters || {}).filter(
-    ([_, v]) => v !== "" && v !== undefined && v !== null
+    ([_, v]) => v !== "" && v !== undefined && v !== null,
   );
 
   if (activeFilters.length === 0) return null;
 
   const religionFilter = filters?.religion;
   const religionStat = religionStats?.stats?.find(
-    (s) => s.religion === religionFilter
+    (s) => s.religion === religionFilter,
   );
 
   return (
