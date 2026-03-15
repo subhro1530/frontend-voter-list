@@ -34,14 +34,20 @@ const statusIcon = (status) => {
 
 function getBoothValue(voter) {
   return (
+    voter?.part_number ??
+    voter?.partNumber ??
     voter?.booth_no ??
     voter?.boothNo ??
     voter?.booth_number ??
     voter?.boothNumber ??
-    voter?.part_number ??
-    voter?.partNumber ??
     ""
   );
+}
+
+function extractLeadingNumber(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^\d+/);
+  return match ? Number(match[0]) : null;
 }
 
 function compareNumericLike(a, b) {
@@ -56,16 +62,25 @@ function compareNumericLike(a, b) {
   });
 }
 
-function sortVotersByBooth(voterList = []) {
+function sortVotersBySerial(voterList = []) {
   return [...voterList].sort((a, b) => {
-    const byBooth = compareNumericLike(getBoothValue(a), getBoothValue(b));
-    if (byBooth !== 0) return byBooth;
-
     const bySerial = compareNumericLike(
       a?.serial_number ?? "",
       b?.serial_number ?? "",
     );
     if (bySerial !== 0) return bySerial;
+
+    const boothA = getBoothValue(a);
+    const boothB = getBoothValue(b);
+    const boothANum = extractLeadingNumber(boothA);
+    const boothBNum = extractLeadingNumber(boothB);
+
+    const bothBoothsHaveLeadingNumber =
+      boothANum !== null && boothBNum !== null;
+    const byBooth = bothBoothsHaveLeadingNumber
+      ? boothANum - boothBNum
+      : compareNumericLike(boothA, boothB);
+    if (byBooth !== 0) return byBooth;
 
     return String(a?.name || "").localeCompare(
       String(b?.name || ""),
@@ -206,7 +221,7 @@ export default function SessionDetail() {
       // Also refresh voters silently if filters are empty
       if (Object.keys(currentFilters).length === 0) {
         getSessionVoters(id, {}, controller.signal)
-          .then((res) => setVoters(sortVotersByBooth(res.voters || res)))
+          .then((res) => setVoters(sortVotersBySerial(res.voters || res)))
           .catch(() => {}); // Silent fail
       }
     }, 5000); // Poll every 5 seconds
@@ -224,7 +239,7 @@ export default function SessionDetail() {
       setErrorVoters("");
       setCurrentFilters(filters);
       getSessionVoters(id, filters, controller.signal)
-        .then((res) => setVoters(sortVotersByBooth(res.voters || res)))
+        .then((res) => setVoters(sortVotersBySerial(res.voters || res)))
         .catch((err) => {
           if (err.name === "AbortError") return;
           setErrorVoters(err.message || "Failed to load voters");

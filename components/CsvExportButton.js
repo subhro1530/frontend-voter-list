@@ -1,6 +1,14 @@
 import { useMemo } from "react";
 
 export default function CsvExportButton({ voters = [], disabled }) {
+  const toCsvValue = (value) => {
+    if (value === null || value === undefined) return "";
+    const text = String(value);
+    const needsQuotes = /[",\n\r]/.test(text);
+    const escaped = text.replace(/"/g, '""');
+    return needsQuotes ? `"${escaped}"` : escaped;
+  };
+
   const csvContent = useMemo(() => {
     if (!voters.length) return "";
     const headers = [
@@ -15,22 +23,18 @@ export default function CsvExportButton({ voters = [], disabled }) {
       "section",
       "assembly",
     ];
+    const headerRow = headers.map(toCsvValue).join(",");
     const rows = voters.map((v) =>
-      headers
-        .map((h) => {
-          const val = v[h] ?? "";
-          if (typeof val === "string" && val.includes(",")) {
-            return `"${val.replace(/"/g, '""')}"`;
-          }
-          return val;
-        })
-        .join(","),
+      headers.map((h) => toCsvValue(v[h])).join(","),
     );
-    return [headers.join(","), ...rows].join("\n");
+    return [headerRow, ...rows].join("\r\n");
   }, [voters]);
 
   const handleExport = () => {
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const utf8Bom = "\uFEFF";
+    const blob = new Blob([utf8Bom + csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;

@@ -1141,7 +1141,7 @@ label {
   select,
   button {
     @apply min-h-[44px];
-  }
+  } 
 
   /* Better spacing for mobile */
   .space-y-6 > * + * {
