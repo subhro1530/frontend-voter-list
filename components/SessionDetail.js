@@ -44,6 +44,17 @@ function getBoothValue(voter) {
   );
 }
 
+function getSerialValue(voter) {
+  return (
+    voter?.serial_number ??
+    voter?.serialNumber ??
+    voter?.sno ??
+    voter?.sl_no ??
+    voter?.slNo ??
+    ""
+  );
+}
+
 function extractLeadingNumber(value) {
   const text = String(value ?? "").trim();
   const match = text.match(/^\d+/);
@@ -64,10 +75,7 @@ function compareNumericLike(a, b) {
 
 function sortVotersBySerial(voterList = []) {
   return [...voterList].sort((a, b) => {
-    const bySerial = compareNumericLike(
-      a?.serial_number ?? "",
-      b?.serial_number ?? "",
-    );
+    const bySerial = compareNumericLike(getSerialValue(a), getSerialValue(b));
     if (bySerial !== 0) return bySerial;
 
     const boothA = getBoothValue(a);

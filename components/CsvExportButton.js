@@ -1,16 +1,34 @@
 import { useMemo } from "react";
+import * as XLSX from "xlsx";
 
 export default function CsvExportButton({ voters = [], disabled }) {
-  const toCsvValue = (value) => {
-    if (value === null || value === undefined) return "";
-    const text = String(value);
-    const needsQuotes = /[",\n\r]/.test(text);
-    const escaped = text.replace(/"/g, '""');
-    return needsQuotes ? `"${escaped}"` : escaped;
+  const getSerial = (voter) => {
+    return (
+      voter?.serial_number ??
+      voter?.serialNumber ??
+      voter?.sno ??
+      voter?.sl_no ??
+      voter?.slNo ??
+      ""
+    );
   };
 
-  const csvContent = useMemo(() => {
-    if (!voters.length) return "";
+  const normalizedRows = useMemo(() => {
+    return voters.map((v) => ({
+      serial_number: getSerial(v),
+      name: v?.name ?? "",
+      voter_id: v?.voter_id ?? "",
+      gender: v?.gender ?? "",
+      age: v?.age ?? "",
+      house_number: v?.house_number ?? "",
+      relation_type: v?.relation_type ?? "",
+      part_number: v?.part_number ?? v?.partNumber ?? "",
+      section: v?.section ?? "",
+      assembly: v?.assembly ?? "",
+    }));
+  }, [voters]);
+
+  const handleExport = () => {
     const headers = [
       "serial_number",
       "name",
@@ -23,24 +41,17 @@ export default function CsvExportButton({ voters = [], disabled }) {
       "section",
       "assembly",
     ];
-    const headerRow = headers.map(toCsvValue).join(",");
-    const rows = voters.map((v) =>
-      headers.map((h) => toCsvValue(v[h])).join(","),
-    );
-    return [headerRow, ...rows].join("\r\n");
-  }, [voters]);
 
-  const handleExport = () => {
-    const utf8Bom = "\uFEFF";
-    const blob = new Blob([utf8Bom + csvContent], {
-      type: "text/csv;charset=utf-8;",
+    const worksheet = XLSX.utils.json_to_sheet(normalizedRows, {
+      header: headers,
+      skipHeader: false,
     });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `voters_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Voters");
+    XLSX.writeFile(
+      workbook,
+      `voters_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
   };
 
   return (
@@ -49,7 +60,7 @@ export default function CsvExportButton({ voters = [], disabled }) {
       disabled={disabled || !voters.length}
       onClick={handleExport}
     >
-      Export CSV
+      Export Excel
     </button>
   );
 }
