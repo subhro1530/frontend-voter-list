@@ -29,6 +29,22 @@ const retryToast = (message, onRetry) => {
   );
 };
 
+const getRepairSuccessMessage = (result) => {
+  const repairedCount =
+    Number(result?.repairedPages) ||
+    Number(result?.repaired_pages) ||
+    Number(result?.pagesRepaired) ||
+    Number(result?.fixedPages) ||
+    Number(result?.fixed_pages) ||
+    0;
+
+  if (repairedCount > 0) {
+    return `Repair complete. Recovered ${repairedCount} page${repairedCount === 1 ? "" : "s"}.`;
+  }
+
+  return result?.message || "Repair complete. Missing pages check finished.";
+};
+
 export default function ElectionResultListPage() {
   return (
     <ProtectedRoute allowedRoles={["admin"]}>
@@ -99,6 +115,21 @@ function ElectionResultListContent() {
       toast.success("Excel downloaded!", { id: "excel-download" });
     } catch (err) {
       toast.error(err.message || "Export failed", { id: "excel-download" });
+    }
+  };
+
+  const handleRepairMissingPages = async (id) => {
+    const actionKey = `repair:${id}`;
+    setActionLoading(actionKey);
+    try {
+      toast.loading("Repairing missing OCR pages...", { id: actionKey });
+      const result = await electionResultsAPI.repairMissingPages(id);
+      toast.success(getRepairSuccessMessage(result), { id: actionKey });
+      loadSessions();
+    } catch (err) {
+      toast.error(err.message || "Repair failed", { id: actionKey });
+    } finally {
+      setActionLoading("");
     }
   };
 
@@ -362,6 +393,15 @@ function ElectionResultListContent() {
                   disabled={actionLoading === s.id}
                 >
                   📥 Excel
+                </button>
+                <button
+                  onClick={() => handleRepairMissingPages(s.id)}
+                  className="btn btn-secondary text-xs py-1.5 px-3"
+                  disabled={actionLoading === `repair:${s.id}`}
+                >
+                  {actionLoading === `repair:${s.id}`
+                    ? "Repairing..."
+                    : "🛠️ Repair Missing Pages"}
                 </button>
                 <button
                   onClick={() => handleDelete(s.id)}

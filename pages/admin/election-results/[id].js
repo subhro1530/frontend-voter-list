@@ -9,6 +9,22 @@ import {
 } from "../../../scripts/electionResultsFrontendLinking";
 import toast from "react-hot-toast";
 
+const getRepairSuccessMessage = (result) => {
+  const repairedCount =
+    Number(result?.repairedPages) ||
+    Number(result?.repaired_pages) ||
+    Number(result?.pagesRepaired) ||
+    Number(result?.fixedPages) ||
+    Number(result?.fixed_pages) ||
+    0;
+
+  if (repairedCount > 0) {
+    return `Repair complete. Recovered ${repairedCount} page${repairedCount === 1 ? "" : "s"}.`;
+  }
+
+  return result?.message || "Repair complete. Missing pages check finished.";
+};
+
 export default function ElectionResultDetailPage() {
   return (
     <ProtectedRoute allowedRoles={["admin"]}>
@@ -30,27 +46,33 @@ function ElectionResultDetailContent() {
   const [selectedVoterSessionId, setSelectedVoterSessionId] = useState("");
   const [switchingVoterSession, setSwitchingVoterSession] = useState(false);
   const [boothSortOrder, setBoothSortOrder] = useState("asc");
+  const [repairingMissingPages, setRepairingMissingPages] = useState(false);
+
+  const loadSessionDetail = async (signal) => {
+    if (!id) return;
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await electionResultsAPI.getSession(id, signal);
+      setData(res);
+      if (boothNo) {
+        setActiveBoothNo(String(boothNo));
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        setError(err.message || "Failed to load election result details");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
     const controller = new AbortController();
-    setLoading(true);
-    setError("");
 
-    electionResultsAPI
-      .getSession(id, controller.signal)
-      .then((res) => {
-        setData(res);
-        if (boothNo) {
-          setActiveBoothNo(String(boothNo));
-        }
-      })
-      .catch((err) => {
-        if (err.name !== "AbortError") {
-          setError(err.message || "Failed to load election result details");
-        }
-      })
-      .finally(() => setLoading(false));
+    loadSessionDetail(controller.signal);
 
     return () => controller.abort();
   }, [id, boothNo]);
@@ -120,6 +142,22 @@ function ElectionResultDetailContent() {
       toast.success("Excel downloaded!", { id: "excel-download" });
     } catch (err) {
       toast.error(err.message || "Export failed", { id: "excel-download" });
+    }
+  };
+
+  const handleRepairMissingPages = async () => {
+    if (!id) return;
+
+    setRepairingMissingPages(true);
+    try {
+      toast.loading("Repairing missing OCR pages...", { id: "repair-pages" });
+      const result = await electionResultsAPI.repairMissingPages(id);
+      await loadSessionDetail();
+      toast.success(getRepairSuccessMessage(result), { id: "repair-pages" });
+    } catch (err) {
+      toast.error(err.message || "Repair failed", { id: "repair-pages" });
+    } finally {
+      setRepairingMissingPages(false);
     }
   };
 
@@ -244,6 +282,15 @@ function ElectionResultDetailContent() {
             className="btn bg-emerald-600 hover:bg-emerald-500 text-white"
           >
             📥 Export Excel
+          </button>
+          <button
+            onClick={handleRepairMissingPages}
+            className="btn btn-secondary"
+            disabled={repairingMissingPages}
+          >
+            {repairingMissingPages
+              ? "Repairing Missing Pages..."
+              : "🛠️ Repair Missing Pages"}
           </button>
         </div>
       </div>
