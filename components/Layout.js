@@ -74,7 +74,7 @@ export default function Layout({ children }) {
       }}
     >
       <Head>
-        <title>{t("Voter List Console")}</title>
+        <title>sabyasachi.online</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta
           name="description"
@@ -82,21 +82,21 @@ export default function Layout({ children }) {
         />
       </Head>
       <header className="sticky top-0 z-20 backdrop-blur bg-ink-100/80 border-b border-ink-400/60">
-        <div className="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
+        <div className="w-full px-4 py-3 flex items-center gap-3 lg:gap-4">
           <Link
             href={
               isAuthenticated ? (isAdmin ? "/admin/dashboard" : "/search") : "/"
             }
-            className="flex items-center gap-2 text-xl font-display font-semibold text-neon-200"
+            className="flex items-center gap-2 text-xl font-display font-semibold text-neon-200 flex-shrink-0"
           >
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-neon-500/20 text-neon-100 font-bold border border-neon-400/50">
               VL
             </span>
-            <span className="hidden sm:inline">{t("Voter List Console")}</span>
+            <span className="hidden sm:inline">sabyasachi.online</span>
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden xl:flex items-center gap-1 text-sm font-semibold flex-shrink-0">
+          <nav className="hidden lg:flex flex-1 min-w-0 items-center justify-end gap-1 text-sm font-semibold">
             {/* Language Selector */}
             <Tooltip text="Change display language">
               <LanguageSelector />
@@ -108,6 +108,12 @@ export default function Layout({ children }) {
                   <>
                     {isAdmin ? (
                       <>
+                        <NavLink
+                          href="/search"
+                          tooltip="Search for voters by name, ID, or address"
+                        >
+                          {t("Search Voters")}
+                        </NavLink>
                         <NavLink
                           href="/admin/dashboard"
                           tooltip="View system overview & statistics"
@@ -309,7 +315,7 @@ export default function Layout({ children }) {
 
           {/* Mobile Menu Button */}
           <button
-            className="xl:hidden p-2 text-slate-100 rounded-lg hover:bg-ink-200/50 transition-colors"
+            className="lg:hidden ml-auto p-2 text-slate-100 rounded-lg hover:bg-ink-200/50 transition-colors"
             onClick={() => setShowMobileMenu(!showMobileMenu)}
             aria-label="Toggle menu"
           >
@@ -340,7 +346,7 @@ export default function Layout({ children }) {
 
         {/* Mobile Menu */}
         {showMobileMenu && (
-          <div className="xl:hidden border-t border-ink-400/50 bg-ink-100/95 backdrop-blur">
+          <div className="lg:hidden border-t border-ink-400/50 bg-ink-100/95 backdrop-blur">
             <div className="px-4 py-4 space-y-2">
               {/* Mobile Language Selector */}
               <div className="px-3 py-2 mb-3">
@@ -367,6 +373,9 @@ export default function Layout({ children }) {
 
                   {isAdmin ? (
                     <>
+                      <MobileNavLink href="/search">
+                        {t("Search Voters")}
+                      </MobileNavLink>
                       <MobileNavLink href="/admin/dashboard">
                         {t("Dashboard")}
                       </MobileNavLink>

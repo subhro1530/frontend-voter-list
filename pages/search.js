@@ -3,8 +3,12 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import ProtectedRoute from "../components/ProtectedRoute";
 import { VoterImage } from "../components/VoterSlip";
+import toast from "react-hot-toast";
 import HelpBanner from "../components/HelpBanner";
-import { userAPI } from "../lib/api";
+import VoterSlipCalibrationPanel from "../components/VoterSlipCalibrationPanel";
+import { useAuth } from "../context/AuthContext";
+import { userAPI, getSessions } from "../lib/api";
+import useMassVoterSlipJob from "../lib/useMassVoterSlipJob";
 
 export default function SearchPage() {
   return (
@@ -16,9 +20,12 @@ export default function SearchPage() {
 
 function SearchContent() {
   const router = useRouter();
+  const { isAdmin } = useAuth();
   const [assemblies, setAssemblies] = useState([]);
+  const [sessions, setSessions] = useState([]);
   const [parts, setParts] = useState([]);
   const [loadingAssemblies, setLoadingAssemblies] = useState(true);
+  const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingParts, setLoadingParts] = useState(false);
 
   const [filters, setFilters] = useState({
@@ -39,6 +46,28 @@ function SearchContent() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showMassPanel, setShowMassPanel] = useState(false);
+  const [massParts, setMassParts] = useState([]);
+  const [loadingMassParts, setLoadingMassParts] = useState(false);
+  const [singleDownloadLoadingByVoterId, setSingleDownloadLoadingByVoterId] =
+    useState({});
+
+  const {
+    massSlip,
+    isStarting,
+    isDownloading,
+    isPollingPaused,
+    activeJob,
+    updateFilters,
+    startJob,
+    retryStatus,
+    restartJob,
+    downloadGeneratedPdf,
+  } = useMassVoterSlipJob({
+    onWarning: (message) => toast(message, { icon: "⚠️" }),
+    onError: (message) => toast.error(message),
+    onSuccess: (message) => toast.success(message),
+  });
 
   // Fetch assemblies on mount
   useEffect(() => {
@@ -54,6 +83,23 @@ function SearchContent() {
         }
       })
       .finally(() => setLoadingAssemblies(false));
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getSessions(controller.signal)
+      .then((res) => {
+        setSessions(res?.sessions || res || []);
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          console.error("Failed to load sessions:", err);
+          setSessions([]);
+        }
+      })
+      .finally(() => setLoadingSessions(false));
 
     return () => controller.abort();
   }, []);
@@ -81,6 +127,30 @@ function SearchContent() {
 
     return () => controller.abort();
   }, [filters.assembly]);
+
+  useEffect(() => {
+    if (!massSlip.filters.assembly) {
+      setMassParts([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoadingMassParts(true);
+
+    userAPI
+      .getParts(massSlip.filters.assembly, controller.signal)
+      .then((res) => {
+        setMassParts(res.parts || res || []);
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          console.error("Failed to load mass booth list:", err);
+        }
+      })
+      .finally(() => setLoadingMassParts(false));
+
+    return () => controller.abort();
+  }, [massSlip.filters.assembly]);
 
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -137,6 +207,93 @@ function SearchContent() {
   const handleVoterClick = (voterId) => {
     router.push(`/voter/${voterId}`);
   };
+
+  const triggerPdfDownload = (blob, fileName) => {
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = fileName || "voterslip.pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  const handleSingleSlipDownload = useCallback(async (voter) => {
+    const voterKey = String(voter?.id || voter?.voter_id || "");
+    if (!voterKey) {
+      toast.error("Missing voter identifier for slip download.");
+      return;
+    }
+
+    setSingleDownloadLoadingByVoterId((prev) => ({
+      ...prev,
+      [voterKey]: true,
+    }));
+
+    try {
+      let res;
+      if (voter?.id) {
+        res = await userAPI.downloadVoterSlipById(voter.id);
+      } else {
+        res = await userAPI.downloadVoterSlipByQueryId(voter.voter_id);
+      }
+
+      const defaultName = `voterslip-${voter.voter_id || voter.id || "download"}.pdf`;
+      triggerPdfDownload(res.blob, res.fileName || defaultName);
+      toast.success("Voter slip download started.");
+    } catch (err) {
+      const message = err?.message || "Failed to download voter slip.";
+      toast.custom((t) => (
+        <div className="rounded-lg border border-rose-700 bg-rose-900 text-rose-100 p-3 shadow-lg max-w-sm">
+          <p className="text-sm">{message}</p>
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              className="px-2 py-1 text-xs rounded bg-rose-700 hover:bg-rose-600"
+              onClick={() => {
+                toast.dismiss(t.id);
+                handleSingleSlipDownload(voter);
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      ));
+    } finally {
+      setSingleDownloadLoadingByVoterId((prev) => ({
+        ...prev,
+        [voterKey]: false,
+      }));
+    }
+  }, []);
+
+  const handleMassStart = async (e) => {
+    e.preventDefault();
+    await startJob(massSlip.filters);
+  };
+
+  const statusBadgeClass = {
+    idle: "bg-slate-700/60 text-slate-200 border-slate-500/60",
+    queued: "bg-amber-900/50 text-amber-100 border-amber-700/60",
+    processing: "bg-sky-900/50 text-sky-100 border-sky-700/60",
+    completed: "bg-emerald-900/50 text-emerald-100 border-emerald-700/60",
+    failed: "bg-rose-900/50 text-rose-100 border-rose-700/60",
+  };
+
+  const statusLabel = {
+    idle: "Idle",
+    queued: "Queued",
+    processing: "Processing",
+    completed: "Completed",
+    failed: "Failed",
+  };
+
+  const progressPercent =
+    massSlip.total > 0
+      ? Math.min(100, Math.round((massSlip.processed / massSlip.total) * 100))
+      : 0;
 
   return (
     <div className="space-y-6">
@@ -285,6 +442,287 @@ function SearchContent() {
         </form>
       </div>
 
+      {/* Mass Voter Slip Generation */}
+      <div className="card space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-100">
+              Mass Voter Slip PDF
+            </h3>
+            <p className="text-sm text-slate-300">
+              Generate one combined PDF by booth or filters without leaving this
+              page.
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Uses backend voter slip template from the active server layout.
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Download requests prefer vertical print layout (4 slips/page).
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowMassPanel((prev) => !prev)}
+          >
+            {showMassPanel ? "Hide Panel" : "Open Mass Generate"}
+          </button>
+        </div>
+
+        {showMassPanel && (
+          <form onSubmit={handleMassStart} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label htmlFor="massAssembly">🏛️ Assembly</label>
+                <select
+                  id="massAssembly"
+                  value={massSlip.filters.assembly}
+                  onChange={(e) =>
+                    updateFilters({ assembly: e.target.value, boothNo: "" })
+                  }
+                  disabled={loadingAssemblies}
+                >
+                  <option value="">
+                    {loadingAssemblies
+                      ? "Loading assemblies..."
+                      : "Select assembly"}
+                  </option>
+                  {assemblies.map((a, idx) => {
+                    const assemblyName =
+                      typeof a === "string"
+                        ? a
+                        : String(a?.name || a?.assembly || "");
+                    const assemblyKey =
+                      typeof a === "string" ? a : a?.id || a?.name || idx;
+                    if (!assemblyName) return null;
+                    return (
+                      <option
+                        key={`mass-asm-${assemblyKey}`}
+                        value={assemblyName}
+                      >
+                        {assemblyName}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="massSession">🗂️ Session (optional)</label>
+                <select
+                  id="massSession"
+                  value={massSlip.filters.sessionId || ""}
+                  onChange={(e) =>
+                    updateFilters({ sessionId: e.target.value.trim() })
+                  }
+                  disabled={loadingSessions}
+                >
+                  <option value="">
+                    {loadingSessions ? "Loading sessions..." : "All sessions"}
+                  </option>
+                  {sessions.map((s, idx) => {
+                    const sessionId = String(s?.id || s?._id || "");
+                    if (!sessionId) return null;
+                    const sessionLabel =
+                      s?.name || s?.title || `Session ${sessionId}`;
+                    return (
+                      <option
+                        key={`mass-session-${sessionId}-${idx}`}
+                        value={sessionId}
+                      >
+                        {sessionLabel}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="massBoothNo">🧩 Booth No (recommended)</label>
+                <input
+                  id="massBoothNo"
+                  type="text"
+                  placeholder="Enter booth number"
+                  value={massSlip.filters.boothNo}
+                  onChange={(e) =>
+                    updateFilters({ boothNo: e.target.value.trim() })
+                  }
+                  list="mass-booth-options"
+                />
+                <datalist id="mass-booth-options">
+                  {massParts.map((p) => {
+                    const partValue = String(p.part_number || p || "");
+                    if (!partValue) return null;
+                    return (
+                      <option key={`mass-booth-${partValue}`} value={partValue}>
+                        Booth {partValue}
+                      </option>
+                    );
+                  })}
+                </datalist>
+                {loadingMassParts && massSlip.filters.assembly && (
+                  <p className="text-xs text-slate-400">
+                    Loading booth suggestions...
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="massSection">📍 Section (optional)</label>
+                <input
+                  id="massSection"
+                  type="text"
+                  placeholder="Section"
+                  value={massSlip.filters.section}
+                  onChange={(e) =>
+                    updateFilters({ section: e.target.value.trim() })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isStarting || activeJob}
+              >
+                {isStarting ? "Starting generation..." : "Start Mass Generate"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowMassPanel(false)}
+              >
+                Close
+              </button>
+              {activeJob && (
+                <span className="text-sm text-amber-300">
+                  One active job is running. Wait for completion before starting
+                  another.
+                </span>
+              )}
+            </div>
+          </form>
+        )}
+
+        {massSlip.jobId && (
+          <div className="rounded-xl border border-ink-400/50 bg-ink-900/40 p-4 space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-base font-semibold text-slate-100">
+                  Mass Job Progress
+                </h4>
+                <p className="text-sm text-slate-300">
+                  {massSlip.filters.boothNo
+                    ? `Generating slips for booth ${massSlip.filters.boothNo}...`
+                    : "Starting generation..."}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Booth No: {massSlip.filters.boothNo || "Not specified"}
+                </p>
+                <p className="text-xs text-slate-400 mt-1 font-mono">
+                  Job ID: {massSlip.jobId}
+                </p>
+              </div>
+              <span
+                className={`inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-semibold ${statusBadgeClass[massSlip.status] || statusBadgeClass.idle}`}
+              >
+                {statusLabel[massSlip.status] || "Idle"}
+              </span>
+            </div>
+
+            <div>
+              {massSlip.total > 0 ? (
+                <>
+                  <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
+                    <span>
+                      {massSlip.processed} / {massSlip.total}
+                    </span>
+                    <span>{progressPercent}%</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-ink-700/80 overflow-hidden">
+                    <div
+                      className="h-full bg-neon-300 transition-all duration-300"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-sm text-slate-300 mb-2">
+                    Processing...
+                  </div>
+                  <div className="h-2.5 rounded-full bg-ink-700/80 overflow-hidden">
+                    <div className="h-full w-1/3 bg-neon-300 animate-pulse" />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {massSlip.status === "completed" && (
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={downloadGeneratedPdf}
+                  disabled={isDownloading}
+                >
+                  {isDownloading ? "Preparing download..." : "Download PDF"}
+                </button>
+                <span className="text-sm text-emerald-300">
+                  Completed. Ready to download.
+                </span>
+              </div>
+            )}
+
+            {massSlip.status === "failed" && (
+              <div className="space-y-3">
+                <div className="p-3 rounded-lg border border-rose-700 bg-rose-900/40 text-rose-100">
+                  {massSlip.error || "Mass generation failed."}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={restartJob}
+                  disabled={isStarting || activeJob}
+                >
+                  Restart with Previous Filters
+                </button>
+              </div>
+            )}
+
+            {isPollingPaused && activeJob && (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm text-amber-300">
+                  Live updates paused due to network issues.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={retryStatus}
+                >
+                  Retry Status
+                </button>
+              </div>
+            )}
+
+            {massSlip.technicalError && (
+              <details className="text-xs text-slate-300 bg-ink-900/60 rounded-lg border border-ink-500/40 p-3">
+                <summary className="cursor-pointer text-slate-200">
+                  Technical details
+                </summary>
+                <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px]">
+                  {massSlip.technicalError}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isAdmin && <VoterSlipCalibrationPanel />}
+
       {/* Error */}
       {error && (
         <div className="p-3 bg-rose-900/50 text-rose-100 rounded-lg border border-rose-700">
@@ -357,7 +795,28 @@ function SearchContent() {
                   <span className="text-xs text-slate-400">
                     Serial #{voter.serial_number || "—"}
                   </span>
-                  <span className="btn-view-mobile">View & Print →</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-secondary text-xs py-1 px-2"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSingleSlipDownload(voter);
+                      }}
+                      disabled={
+                        !!singleDownloadLoadingByVoterId[
+                          String(voter.id || voter.voter_id)
+                        ]
+                      }
+                    >
+                      {singleDownloadLoadingByVoterId[
+                        String(voter.id || voter.voter_id)
+                      ]
+                        ? "Downloading..."
+                        : "Download Slip"}
+                    </button>
+                    <span className="btn-view-mobile">View & Print →</span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -409,15 +868,35 @@ function SearchContent() {
                       {voter.gender || "—"}
                     </td>
                     <td className="p-2">
-                      <button
-                        className="btn btn-primary text-xs py-1 px-3"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleVoterClick(voter.id || voter.voter_id);
-                        }}
-                      >
-                        <span className="mr-1">🖨️</span> View & Print
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className="btn btn-secondary text-xs py-1 px-3"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSingleSlipDownload(voter);
+                          }}
+                          disabled={
+                            !!singleDownloadLoadingByVoterId[
+                              String(voter.id || voter.voter_id)
+                            ]
+                          }
+                        >
+                          {singleDownloadLoadingByVoterId[
+                            String(voter.id || voter.voter_id)
+                          ]
+                            ? "Downloading..."
+                            : "Download Slip"}
+                        </button>
+                        <button
+                          className="btn btn-primary text-xs py-1 px-3"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleVoterClick(voter.id || voter.voter_id);
+                          }}
+                        >
+                          <span className="mr-1">🖨️</span> View & Print
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

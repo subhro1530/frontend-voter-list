@@ -29,7 +29,7 @@ export default function AgentPage() {
   return (
     <>
       <Head>
-        <title>AI Assistant | Voter Console</title>
+        <title>AI Assistant | sabyasachi.online</title>
       </Head>
       <ChatInterface isAdmin={isAdmin} user={user} />
     </>
