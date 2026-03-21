@@ -508,7 +508,7 @@ function SearchContent() {
               </div>
 
               <div className="space-y-2">
-                <label htmlFor="massSession">🗂️ Session (optional)</label>
+                <label htmlFor="massSession">🗂️ Voter List (optional)</label>
                 <select
                   id="massSession"
                   value={massSlip.filters.sessionId || ""}
@@ -518,13 +518,15 @@ function SearchContent() {
                   disabled={loadingSessions}
                 >
                   <option value="">
-                    {loadingSessions ? "Loading sessions..." : "All sessions"}
+                    {loadingSessions
+                      ? "Loading voter lists..."
+                      : "All voter lists"}
                   </option>
                   {sessions.map((s, idx) => {
                     const sessionId = String(s?.id || s?._id || "");
                     if (!sessionId) return null;
                     const sessionLabel =
-                      s?.name || s?.title || `Session ${sessionId}`;
+                      s?.name || s?.title || `Voter List ${sessionId}`;
                     return (
                       <option
                         key={`mass-session-${sessionId}-${idx}`}

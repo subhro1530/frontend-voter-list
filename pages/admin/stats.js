@@ -180,7 +180,7 @@ function AdminStatsContent() {
       else if (lowerReligion.includes("jain")) key = "Jain";
       else if (
         !["Hindu", "Muslim", "Christian", "Sikh", "Buddhist", "Jain"].includes(
-          rawReligion
+          rawReligion,
         )
       )
         key = "Other";
@@ -219,7 +219,7 @@ function AdminStatsContent() {
       apiKeyStatus.active ||
       engines.filter(
         (e) =>
-          e.status === "active" || e.status === "idle" || e.status === "ready"
+          e.status === "active" || e.status === "idle" || e.status === "ready",
       ).length ||
       0;
 
@@ -234,11 +234,11 @@ function AdminStatsContent() {
   const overallStats = useMemo(() => {
     const totalVoters = sessions.reduce(
       (acc, s) => acc + (parseInt(s.voter_count, 10) || 0),
-      0
+      0,
     );
     const totalSessions = sessions.length;
     const completedSessions = sessions.filter(
-      (s) => s.status === "completed" || s.status === "done"
+      (s) => s.status === "completed" || s.status === "done",
     ).length;
 
     return { totalVoters, totalSessions, completedSessions };
@@ -274,8 +274,8 @@ function AdminStatsContent() {
               apiAvailability.percentage > 50
                 ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
                 : apiAvailability.percentage > 20
-                ? "bg-gradient-to-r from-amber-500 to-amber-400"
-                : "bg-gradient-to-r from-rose-500 to-rose-400"
+                  ? "bg-gradient-to-r from-amber-500 to-amber-400"
+                  : "bg-gradient-to-r from-rose-500 to-rose-400"
             }`}
             style={{ width: `${apiAvailability.percentage}%` }}
           />
@@ -313,7 +313,7 @@ function AdminStatsContent() {
           <div className="flex items-center gap-3">
             <span className="text-3xl">✅</span>
             <div>
-              <p className="text-sm text-slate-300">Completed Sessions</p>
+              <p className="text-sm text-slate-300">Completed Voter Lists</p>
               <p className="text-2xl font-bold text-slate-100">
                 {overallStats.completedSessions}
               </p>
@@ -354,7 +354,7 @@ function AdminStatsContent() {
               <option value="">{t("All Sessions")}</option>
               {sessions.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.original_filename || `Session ${s.id}`}
+                  {s.original_filename || `Voter List ${s.id}`}
                 </option>
               ))}
             </select>
@@ -400,7 +400,7 @@ function AdminStatsContent() {
                     {printStats.total_voters
                       ? Math.round(
                           (printStats.printed_count / printStats.total_voters) *
-                            100
+                            100,
                         )
                       : 0}
                     %
@@ -566,8 +566,8 @@ function AdminStatsContent() {
                         {stat.gender === "Male"
                           ? "👨"
                           : stat.gender === "Female"
-                          ? "👩"
-                          : "🧑"}
+                            ? "👩"
+                            : "🧑"}
                       </span>
                       <p className="text-sm font-semibold text-slate-200 capitalize">
                         {t(stat.gender)}

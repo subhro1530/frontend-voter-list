@@ -220,8 +220,12 @@ function ProfileContent() {
                 icon="📊"
                 label="Dashboard"
               />
-              <QuickAction href="/sessions" icon="📋" label="View Sessions" />
-              <QuickAction href="/upload" icon="📤" label="Upload PDF" />
+              <QuickAction
+                href="/sessions"
+                icon="📋"
+                label="View Voter Lists"
+              />
+              <QuickAction href="/upload" icon="📤" label="Upload Voter List" />
               <QuickAction href="/admin/users" icon="👥" label="Manage Users" />
               <QuickAction href="/admin/api-keys" icon="🔑" label="API Keys" />
               <QuickAction href="/admin/stats" icon="📈" label="Statistics" />

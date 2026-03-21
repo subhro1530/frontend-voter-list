@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Work+Sans:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&family=Source+Sans+3:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -484,6 +484,216 @@ label {
 .nav-link {
   @apply px-3 py-2 rounded-lg text-slate-200 hover:text-neon-100 hover:bg-ink-200/50 
          transition-all duration-200 font-medium;
+}
+
+.overview-banner {
+  @apply relative overflow-hidden rounded-2xl border border-ink-400/70 min-h-[180px] sm:min-h-[210px] shadow-card;
+}
+
+.overview-banner-image {
+  @apply absolute inset-0 h-full w-full object-cover;
+  transform: scale(1.03);
+  filter: blur(1.2px) brightness(0.74) saturate(0.85);
+  transition:
+    transform 520ms ease,
+    filter 520ms ease;
+}
+
+.overview-banner-overlay {
+  @apply absolute inset-0;
+  background:
+    linear-gradient(
+      115deg,
+      rgba(3, 15, 44, 0.92) 15%,
+      rgba(8, 26, 61, 0.68) 55%,
+      rgba(18, 42, 83, 0.45) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(255, 153, 51, 0.2) 0%,
+      rgba(255, 255, 255, 0.03) 50%,
+      rgba(19, 136, 8, 0.2) 100%
+    );
+  opacity: 0.96;
+  transition: opacity 420ms ease;
+}
+
+.overview-banner-content {
+  @apply relative z-10 px-5 py-6 sm:px-8 sm:py-8 max-w-3xl;
+  transform: translateY(0);
+  transition: transform 420ms ease;
+}
+
+.overview-banner-kicker {
+  @apply text-xs sm:text-sm uppercase tracking-[0.2em] text-amber-200/90 font-semibold mb-2;
+}
+
+.overview-banner-title {
+  @apply text-2xl sm:text-3xl lg:text-4xl font-display text-white leading-tight;
+}
+
+.overview-banner-summary {
+  @apply mt-2 text-sm sm:text-base text-slate-200/90 leading-relaxed;
+}
+
+.overview-banner:hover .overview-banner-image {
+  transform: scale(1.12);
+  filter: blur(0) brightness(1) saturate(1.08);
+}
+
+.overview-banner:hover .overview-banner-overlay {
+  opacity: 0.72;
+}
+
+.overview-banner:hover .overview-banner-content {
+  transform: translateY(8px);
+}
+
+.eci-dashboard-hero {
+  @apply relative rounded-2xl border border-ink-400/70 overflow-hidden min-h-[280px] sm:min-h-[320px] shadow-card;
+}
+
+.eci-slide {
+  @apply absolute inset-0 opacity-0 pointer-events-none transition-opacity duration-700;
+}
+
+.eci-slide-active {
+  @apply opacity-100 pointer-events-auto;
+}
+
+.eci-slide-image {
+  @apply absolute inset-0 h-full w-full object-cover;
+  transform: scale(1.04);
+  filter: blur(1.1px) brightness(0.72) saturate(0.88);
+  transition:
+    transform 560ms ease,
+    filter 560ms ease;
+}
+
+.eci-slide-overlay {
+  @apply absolute inset-0;
+  background:
+    linear-gradient(
+      120deg,
+      rgba(2, 12, 38, 0.9) 20%,
+      rgba(8, 21, 56, 0.6) 60%,
+      rgba(9, 26, 66, 0.35) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(255, 153, 51, 0.16) 0%,
+      rgba(255, 255, 255, 0.02) 50%,
+      rgba(19, 136, 8, 0.16) 100%
+    );
+  opacity: 0.98;
+  transition: opacity 420ms ease;
+}
+
+.eci-slide-content {
+  @apply relative z-10 h-full flex flex-col justify-end p-5 sm:p-8;
+  transform: translateY(0);
+  transition: transform 420ms ease;
+}
+
+.eci-kicker {
+  @apply text-[11px] sm:text-xs uppercase tracking-[0.18em] text-amber-200 mb-2 font-semibold;
+}
+
+.eci-slide-title {
+  @apply text-2xl sm:text-3xl font-display text-white;
+}
+
+.eci-slide-subtitle {
+  @apply mt-2 text-sm sm:text-base text-slate-200 max-w-2xl;
+}
+
+.eci-slide-dots {
+  @apply absolute z-20 bottom-4 right-4 flex items-center gap-2;
+}
+
+.eci-dot {
+  @apply h-2.5 w-2.5 rounded-full bg-white/35 border border-white/20 transition-all;
+}
+
+.eci-dot-active {
+  @apply w-7 bg-white;
+}
+
+.eci-dashboard-hero:hover .eci-slide-active .eci-slide-image {
+  transform: scale(1.12);
+  filter: blur(0) brightness(1) saturate(1.08);
+}
+
+.eci-dashboard-hero:hover .eci-slide-active .eci-slide-overlay {
+  opacity: 0.72;
+}
+
+.eci-dashboard-hero:hover .eci-slide-active .eci-slide-content {
+  transform: translateY(10px);
+}
+
+.eci-scheme-strip {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-4;
+}
+
+.eci-scheme-card {
+  @apply relative rounded-xl overflow-hidden border border-ink-400/60 min-h-[120px] shadow-card;
+  transition:
+    transform 320ms ease,
+    border-color 320ms ease;
+}
+
+.eci-scheme-image {
+  @apply absolute inset-0 h-full w-full object-cover;
+  transform: scale(1.03);
+  filter: blur(1px) brightness(0.76) saturate(0.88);
+  transition:
+    transform 520ms ease,
+    filter 520ms ease;
+}
+
+.eci-scheme-overlay {
+  @apply absolute inset-0;
+  background: linear-gradient(
+    105deg,
+    rgba(4, 18, 48, 0.9) 25%,
+    rgba(7, 28, 70, 0.62) 68%,
+    rgba(8, 35, 84, 0.42) 100%
+  );
+  opacity: 0.94;
+  transition: opacity 420ms ease;
+}
+
+.eci-scheme-content {
+  @apply relative z-10 p-4 sm:p-5;
+  transform: translateY(0);
+  transition: transform 420ms ease;
+}
+
+.eci-scheme-content h3 {
+  @apply text-base sm:text-lg text-slate-100 font-display;
+}
+
+.eci-scheme-content p {
+  @apply mt-1 text-sm text-slate-300;
+}
+
+.eci-scheme-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(113, 176, 255, 0.62);
+}
+
+.eci-scheme-card:hover .eci-scheme-image {
+  transform: scale(1.12);
+  filter: blur(0) brightness(1) saturate(1.08);
+}
+
+.eci-scheme-card:hover .eci-scheme-overlay {
+  opacity: 0.7;
+}
+
+.eci-scheme-card:hover .eci-scheme-content {
+  transform: translateY(8px);
 }
 
 /* Chatbot Animations */
@@ -1141,7 +1351,7 @@ label {
   select,
   button {
     @apply min-h-[44px];
-  } 
+  }
 
   /* Better spacing for mobile */
   .space-y-6 > * + * {

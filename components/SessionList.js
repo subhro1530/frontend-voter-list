@@ -195,7 +195,7 @@ export default function SessionList() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-slate-100">Sessions</h2>
+        <h2 className="text-xl font-semibold text-slate-100">Voter Lists</h2>
         <button className="btn btn-secondary" onClick={load} disabled={loading}>
           Refresh
         </button>
@@ -205,9 +205,11 @@ export default function SessionList() {
           {error}
         </div>
       )}
-      {loading && <div className="p-3 text-slate-300">Loading sessions…</div>}
+      {loading && (
+        <div className="p-3 text-slate-300">Loading voter lists…</div>
+      )}
       {!loading && sessions.length === 0 && !error && (
-        <div className="p-3 text-slate-400">No sessions yet.</div>
+        <div className="p-3 text-slate-400">No voter lists yet.</div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {sessions.map((s) => {

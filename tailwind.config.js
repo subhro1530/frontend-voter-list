@@ -8,8 +8,8 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Work Sans"', "system-ui", "sans-serif"],
-        body: ['"Inter"', "system-ui", "sans-serif"],
+        display: ['"Merriweather"', "Georgia", "serif"],
+        body: ['"Source Sans 3"', "system-ui", "sans-serif"],
       },
       colors: {
         ink: {

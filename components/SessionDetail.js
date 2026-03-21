@@ -320,7 +320,7 @@ export default function SessionDetail() {
             href="/sessions"
             className="text-sm text-neon-200 hover:text-neon-100"
           >
-            ← Back to sessions
+            ← Back to voter lists
           </Link>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-display font-semibold">

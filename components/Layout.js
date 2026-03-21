@@ -6,15 +6,16 @@ import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import Footer from "./Footer";
 import LanguageSelector from "./LanguageSelector";
+import PageOverviewBanner from "./PageOverviewBanner";
 
 // Tooltip component for helpful descriptions
 function Tooltip({ children, text }) {
   return (
     <div className="relative group/tooltip">
       {children}
-      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-50 whitespace-nowrap pointer-events-none">
+      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-50 whitespace-nowrap pointer-events-none">
         <p className="text-xs text-slate-200 font-normal">{text}</p>
-        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-ink-400"></div>
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 -mb-1 border-4 border-transparent border-b-ink-400"></div>
       </div>
     </div>
   );
@@ -122,13 +123,13 @@ export default function Layout({ children }) {
                         </NavLink>
                         <NavLink
                           href="/sessions"
-                          tooltip="View uploaded PDF batches"
+                          tooltip="View uploaded voter lists"
                         >
                           {t("Sessions")}
                         </NavLink>
                         <NavLink
                           href="/upload"
-                          tooltip="Upload new voter list PDFs"
+                          tooltip="Upload a new voter list PDF"
                         >
                           {t("Upload")}
                         </NavLink>
@@ -154,28 +155,88 @@ export default function Layout({ children }) {
                           href="/admin/election-results"
                           tooltip="View & manage election result sessions"
                         >
-                          📊 {t("Elections")}
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg
+                              className="w-3.5 h-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M3 3v18h18M7 14l4-4 3 3 5-7"
+                              />
+                            </svg>
+                            {t("Elections")}
+                          </span>
                         </NavLink>
                         <NavLink
                           href="/affidavits"
                           tooltip="Fill Form 26 affidavit manually"
                           className="bg-emerald-600/15 border-emerald-500/40"
                         >
-                          📋 {t("Affidavits")}
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg
+                              className="w-3.5 h-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 12h6m-6 4h6M8 4h8a2 2 0 012 2v12a2 2 0 01-2 2H8a2 2 0 01-2-2V6a2 2 0 012-2z"
+                              />
+                            </svg>
+                            {t("Affidavits")}
+                          </span>
                         </NavLink>
                         <NavLink
                           href="/nominations"
                           tooltip="Fill Form 2B nomination paper manually"
                           className="bg-amber-600/15 border-amber-500/40"
                         >
-                          📜 {t("Nominations")}
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg
+                              className="w-3.5 h-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M8 6h10M8 10h10M8 14h6M6 4h.01M6 8h.01M6 12h.01M6 16h.01"
+                              />
+                            </svg>
+                            {t("Nominations")}
+                          </span>
                         </NavLink>
                         <NavLink
                           href="/agent"
                           tooltip="Ask AI questions about your data"
                           className="bg-purple-600/20 border-purple-500/50"
                         >
-                          🤖 AI
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg
+                              className="w-3.5 h-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 7V6a3 3 0 016 0v1m-7 4h8m-8 4h8M5 11h14v6a3 3 0 01-3 3H8a3 3 0 01-3-3v-6z"
+                              />
+                            </svg>
+                            AI
+                          </span>
                         </NavLink>
                         <Tooltip text="Interactive constituency map explorer">
                           <Link
@@ -211,7 +272,22 @@ export default function Layout({ children }) {
                           tooltip="Ask AI questions about voter data"
                           className="bg-purple-600/20 border-purple-500/50"
                         >
-                          🤖 AI
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg
+                              className="w-3.5 h-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 7V6a3 3 0 016 0v1m-7 4h8m-8 4h8M5 11h14v6a3 3 0 01-3 3H8a3 3 0 01-3-3v-6z"
+                              />
+                            </svg>
+                            AI
+                          </span>
                         </NavLink>
                       </>
                     )}
@@ -271,7 +347,22 @@ export default function Layout({ children }) {
                               className="block px-4 py-2 text-sm text-slate-200 hover:bg-ink-100/50 transition-colors"
                               onClick={() => setShowProfileMenu(false)}
                             >
-                              <span className="mr-2">👤</span> {t("My Profile")}
+                              <span className="inline-flex items-center gap-2">
+                                <svg
+                                  className="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M5.121 17.804A8 8 0 1118.88 17.8M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                                  />
+                                </svg>
+                                {t("My Profile")}
+                              </span>
                             </Link>
                             {isAdmin && (
                               <Link
@@ -279,8 +370,22 @@ export default function Layout({ children }) {
                                 className="block px-4 py-2 text-sm text-slate-200 hover:bg-ink-100/50 transition-colors"
                                 onClick={() => setShowProfileMenu(false)}
                               >
-                                <span className="mr-2">📊</span>{" "}
-                                {t("Admin Dashboard")}
+                                <span className="inline-flex items-center gap-2">
+                                  <svg
+                                    className="w-4 h-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M3 3v18h18M7 14l4-4 3 3 5-7"
+                                    />
+                                  </svg>
+                                  {t("Admin Dashboard")}
+                                </span>
                               </Link>
                             )}
                             <button
@@ -290,7 +395,22 @@ export default function Layout({ children }) {
                               }}
                               className="w-full text-left px-4 py-2 text-sm text-rose-300 hover:bg-rose-900/30 transition-colors"
                             >
-                              <span className="mr-2">🚪</span> {t("Sign Out")}
+                              <span className="inline-flex items-center gap-2">
+                                <svg
+                                  className="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1"
+                                  />
+                                </svg>
+                                {t("Sign Out")}
+                              </span>
                             </button>
                           </div>
                         </div>
@@ -395,19 +515,17 @@ export default function Layout({ children }) {
                         {t("Stats")}
                       </MobileNavLink>
                       <MobileNavLink href="/admin/election-results">
-                        📊 {t("Elections")}
+                        {t("Elections")}
                       </MobileNavLink>
                       <MobileNavLink href="/affidavits">
-                        📋 {t("Affidavits")}
+                        {t("Affidavits")}
                       </MobileNavLink>
                       <MobileNavLink href="/nominations">
-                        📜 {t("Nominations")}
+                        {t("Nominations")}
                       </MobileNavLink>
-                      <MobileNavLink href="/agent">
-                        🤖 {t("Agent")}
-                      </MobileNavLink>
+                      <MobileNavLink href="/agent">{t("Agent")}</MobileNavLink>
                       <MobileNavLink href="/admin/map">
-                        🗺️ {t("Map Console")}
+                        {t("Map Console")}
                       </MobileNavLink>
                     </>
                   ) : (
@@ -415,9 +533,7 @@ export default function Layout({ children }) {
                       <MobileNavLink href="/search">
                         {t("Search Voters")}
                       </MobileNavLink>
-                      <MobileNavLink href="/agent">
-                        🤖 {t("Agent")}
-                      </MobileNavLink>
+                      <MobileNavLink href="/agent">{t("Agent")}</MobileNavLink>
                     </>
                   )}
 
@@ -438,7 +554,19 @@ export default function Layout({ children }) {
                       href="mailto:acodernamedsubhro@gmail.com"
                       className="flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-neon-200 hover:bg-ink-200/30 rounded-lg transition-colors"
                     >
-                      <span>📧</span>
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                        />
+                      </svg>
                       <span>Contact Support</span>
                     </a>
                   </div>
@@ -456,7 +584,19 @@ export default function Layout({ children }) {
                       href="mailto:acodernamedsubhro@gmail.com"
                       className="flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-neon-200 hover:bg-ink-200/30 rounded-lg transition-colors"
                     >
-                      <span>📧</span>
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                        />
+                      </svg>
                       <span>Contact Support</span>
                     </a>
                   </div>
@@ -467,6 +607,7 @@ export default function Layout({ children }) {
         )}
       </header>
       <main className="mx-auto max-w-6xl px-4 py-8 pb-20 space-y-6">
+        <PageOverviewBanner />
         {children}
       </main>
       <footer className="border-t border-ink-400/70 bg-ink-100/80 mb-12">
@@ -482,14 +623,14 @@ export default function Layout({ children }) {
                     href="/sessions"
                     className="hover:text-neon-200 transition-colors"
                   >
-                    Sessions
+                    Voter Lists
                   </a>
                   <span className="text-ink-400">•</span>
                   <a
                     href="/upload"
                     className="hover:text-neon-200 transition-colors"
                   >
-                    Upload
+                    Upload Voter List
                   </a>
                   <span className="text-ink-400">•</span>
                 </>
@@ -499,7 +640,19 @@ export default function Layout({ children }) {
                 className="flex items-center gap-1 hover:text-neon-200 transition-colors"
                 title="Contact for support"
               >
-                <span>📧</span>
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
+                </svg>
                 <span className="hidden sm:inline">Support</span>
               </a>
             </div>
@@ -517,9 +670,19 @@ export default function Layout({ children }) {
             href="/agent"
             className="w-14 h-14 bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-700 rounded-full shadow-lg shadow-purple-500/30 flex items-center justify-center text-2xl hover:scale-110 hover:shadow-xl hover:shadow-purple-500/40 transition-all"
           >
-            <span className="group-hover/fab:scale-110 transition-transform">
-              🤖
-            </span>
+            <svg
+              className="w-7 h-7 text-white group-hover/fab:scale-110 transition-transform"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.8}
+                d="M9 7V6a3 3 0 016 0v1m-7 4h8m-8 4h8M5 11h14v6a3 3 0 01-3 3H8a3 3 0 01-3-3v-6z"
+              />
+            </svg>
             <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-ink-100 animate-pulse"></span>
           </Link>
           {/* Tooltip on hover */}

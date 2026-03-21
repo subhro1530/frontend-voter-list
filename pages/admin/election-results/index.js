@@ -179,7 +179,7 @@ function ElectionResultListContent() {
             📊 Election Results
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Manage Form 20 election result sessions
+            Manage Form 20 election result voter lists
           </p>
         </div>
         <div className="flex gap-2">
@@ -280,7 +280,7 @@ function ElectionResultListContent() {
 
       {loading && sessions.length > 0 && (
         <div className="p-3 text-slate-300 card">
-          Refreshing filtered sessions...
+          Refreshing filtered voter lists...
         </div>
       )}
 
@@ -290,7 +290,7 @@ function ElectionResultListContent() {
           <div className="text-5xl mb-4">📊</div>
           <h3 className="text-lg font-semibold text-slate-100 mb-2">
             {hasActiveFilters(filters)
-              ? "No filtered sessions found"
+              ? "No filtered voter lists found"
               : "No election results yet"}
           </h3>
           <p className="text-slate-400 mb-6">
@@ -314,7 +314,7 @@ function ElectionResultListContent() {
         </div>
       )}
 
-      {/* Sessions Grid */}
+      {/* Voter Lists Grid */}
       {!loading && sessions.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {sessions.map((s) => (

@@ -6,55 +6,47 @@ import { useAuth } from "../context/AuthContext";
 
 const FEATURES = [
   {
-    icon: "📄",
+    icon: "document",
     title: "Voter List OCR",
     description: "Upload voter list PDFs and extract data with AI-powered OCR",
     path: "/upload",
     gradient: "from-blue-500 to-cyan-400",
   },
   {
-    icon: "📊",
+    icon: "chart",
     title: "Election Results",
     description: "Process Form 20 election result sheets with booth-wise data",
     path: "/admin/election-results",
     gradient: "from-purple-500 to-pink-400",
   },
   {
-    icon: "📋",
+    icon: "clipboard",
     title: "Affidavit Scanner",
-    description:
-      "OCR nomination papers & affidavits, export as Word documents",
+    description: "OCR nomination papers & affidavits, export as Word documents",
     path: "/affidavits",
     gradient: "from-emerald-500 to-teal-400",
   },
   {
-    icon: "🤖",
+    icon: "bot",
     title: "AI Agent",
     description: "Query the voter database using natural language",
     path: "/agent",
     gradient: "from-orange-500 to-amber-400",
   },
   {
-    icon: "🔍",
+    icon: "search",
     title: "Smart Search",
     description: "Find voters by name, ID, assembly, religion, and more",
     path: "/search",
     gradient: "from-rose-500 to-red-400",
   },
   {
-    icon: "📈",
+    icon: "analytics",
     title: "Analytics",
     description: "View demographics, religion stats, and age distributions",
     path: "/admin/stats",
     gradient: "from-indigo-500 to-violet-400",
   },
-];
-
-const TEAM_PHOTOS = [
-  { name: "Person 1", role: "Title Here", photo: "/photos/person1.jpg" },
-  { name: "Person 2", role: "Title Here", photo: "/photos/person2.jpg" },
-  { name: "Person 3", role: "Title Here", photo: "/photos/person3.jpg" },
-  { name: "Person 4", role: "Title Here", photo: "/photos/person4.jpg" },
 ];
 
 export default function Home() {
@@ -130,13 +122,13 @@ export default function Home() {
                 href="/register"
                 className="btn btn-primary text-base px-8 py-3"
               >
-                🚀 Get Started Free
+                Get Started Free
               </Link>
               <Link
                 href="/login"
                 className="btn btn-secondary text-base px-8 py-3"
               >
-                👤 Sign In
+                Sign In
               </Link>
             </div>
 
@@ -148,9 +140,9 @@ export default function Home() {
                   tone: "emerald",
                   dot: true,
                 },
-                { label: "📋 Affidavit OCR", tone: "neon" },
-                { label: "🖨️ Print slips", tone: "blue" },
-                { label: "📊 CSV export", tone: "amber" },
+                { label: "Affidavit OCR", tone: "neon" },
+                { label: "Print slips", tone: "blue" },
+                { label: "CSV export", tone: "amber" },
               ].map((pill) => (
                 <div
                   key={pill.label}
@@ -225,7 +217,7 @@ export default function Home() {
                 <div
                   className={`w-12 h-12 rounded-xl bg-gradient-to-br ${feature.gradient} flex items-center justify-center text-2xl mb-4 shadow-lg group-hover:scale-110 transition-transform`}
                 >
-                  {feature.icon}
+                  <HomeIcon type={feature.icon} />
                 </div>
                 <h3 className="text-lg font-semibold text-slate-100 mb-2">
                   {feature.title}
@@ -234,46 +226,6 @@ export default function Home() {
                   {feature.description}
                 </p>
               </div>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* Team / People Photos */}
-      <section>
-        <h2 className="text-2xl sm:text-3xl font-display font-semibold text-slate-50 text-center mb-3">
-          Our Team
-        </h2>
-        <p className="text-slate-400 text-center mb-8">
-          The people behind this platform
-        </p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          {TEAM_PHOTOS.map((person, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.15 }}
-              className="group text-center"
-            >
-              <div className="relative mb-4 overflow-hidden rounded-2xl aspect-square bg-gradient-to-br from-ink-300 to-ink-200 border border-ink-400">
-                <img
-                  src={person.photo}
-                  alt={person.name}
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                  onError={(e) => {
-                    e.target.style.display = "none";
-                    if (e.target.nextSibling)
-                      e.target.nextSibling.style.display = "flex";
-                  }}
-                />
-                <div className="absolute inset-0 items-center justify-center text-4xl bg-gradient-to-br from-neon-500/20 to-blue-500/20 hidden">
-                  👤
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
-              <h3 className="text-slate-100 font-semibold">{person.name}</h3>
-              <p className="text-sm text-slate-400">{person.role}</p>
             </motion.div>
           ))}
         </div>
@@ -295,7 +247,20 @@ export default function Home() {
             href="mailto:acodernamedsubhro@gmail.com"
             className="btn btn-secondary whitespace-nowrap"
           >
-            <span className="mr-2">📧</span>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+              />
+            </svg>
             Contact Us
           </a>
         </div>
@@ -317,5 +282,70 @@ export default function Home() {
         </p>
       </div>
     </div>
+  );
+}
+
+function HomeIcon({ type }) {
+  const icons = {
+    document: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M9 12h6m-6 4h6M8 4h8a2 2 0 012 2v12a2 2 0 01-2 2H8a2 2 0 01-2-2V6a2 2 0 012-2z"
+      />
+    ),
+    chart: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M3 3v18h18M7 14l4-4 3 3 5-7"
+      />
+    ),
+    clipboard: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M9 5h6M9 9h6m-6 4h6m-7 7h8a2 2 0 002-2V6a2 2 0 00-2-2h-1.5a2.5 2.5 0 00-5 0H8a2 2 0 00-2 2v12a2 2 0 002 2z"
+      />
+    ),
+    bot: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M9 7V6a3 3 0 016 0v1m-7 4h8m-8 4h8M5 11h14v6a3 3 0 01-3 3H8a3 3 0 01-3-3v-6z"
+      />
+    ),
+    search: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M21 21l-4.35-4.35m1.85-4.65a7 7 0 11-14 0 7 7 0 0114 0z"
+      />
+    ),
+    analytics: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M7 12v6m5-10v10m5-14v14M3 21h18"
+      />
+    ),
+  };
+
+  return (
+    <svg
+      className="h-6 w-6 text-white"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      {icons[type] || icons.chart}
+    </svg>
   );
 }

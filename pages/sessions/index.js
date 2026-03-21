@@ -8,14 +8,14 @@ export default function SessionsPage() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-display font-semibold text-slate-100">
-              Sessions
+              Voter Lists
             </h1>
             <p className="text-slate-300">
-              Review, refresh, and manage existing sessions.
+              Review, refresh, and manage existing voter lists.
             </p>
           </div>
           <div className="text-sm text-slate-400">
-            Session creation happens on the upload page.
+            Voter list creation happens on the upload page.
           </div>
         </div>
         <SessionList />

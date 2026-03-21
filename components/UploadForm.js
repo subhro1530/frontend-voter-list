@@ -49,9 +49,11 @@ export default function UploadForm({ onCreated }) {
     <div id="upload" className="card space-y-4 text-slate-100">
       <div className="flex items-center justify-between">
         <div className="space-y-1">
-          <h3 className="text-lg font-semibold text-slate-50">Upload PDF</h3>
+          <h3 className="text-lg font-semibold text-slate-50">
+            Upload Voter List
+          </h3>
           <p className="text-sm text-slate-200/80">
-            We will post to POST /sessions and return a session id. Add your
+            We will post to POST /sessions and return a voter list id. Add your
             Gemini key if the backend expects it.
           </p>
         </div>
@@ -87,7 +89,7 @@ export default function UploadForm({ onCreated }) {
           </div>
         )}
         <button type="submit" className="btn btn-primary" disabled={loading}>
-          {loading ? "Uploading…" : "Upload & Create Session"}
+          {loading ? "Uploading…" : "Upload & Create Voter List"}
         </button>
       </form>
       {loading && (
@@ -97,7 +99,9 @@ export default function UploadForm({ onCreated }) {
       )}
       {createdId && (
         <div className="p-3 bg-emerald-900/40 border border-emerald-600 rounded-lg text-emerald-100 space-y-2">
-          <div className="font-semibold text-emerald-100">Session created</div>
+          <div className="font-semibold text-emerald-100">
+            Voter list created
+          </div>
           <div className="text-sm break-all text-emerald-50">
             ID: {createdId}
           </div>

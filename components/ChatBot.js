@@ -394,8 +394,8 @@ const ResponseGenerator = {
 
     if (isAdmin) {
       response += `\n**Admin Features:**\n`;
-      response += `📤 **Upload PDFs** - OCR processing of voter lists\n`;
-      response += `📁 **Sessions** - Manage uploaded documents\n`;
+      response += `📤 **Upload Voter Lists** - OCR processing of voter lists\n`;
+      response += `📁 **Voter Lists** - Manage uploaded documents\n`;
       response += `👥 **Users** - Manage system users\n`;
       response += `📊 **Statistics** - View analytics dashboard\n`;
     }
@@ -425,7 +425,7 @@ const ResponseGenerator = {
         actions: [this.generateLink("/search", "🔍 Search Voters instead")],
       },
       sessions: {
-        text: "🔒 Session management is an admin-only feature.",
+        text: "🔒 Voter list management is an admin-only feature.",
         actions: [this.generateLink("/search", "🔍 Search Voters instead")],
       },
       user_management: {
@@ -489,7 +489,7 @@ const ResponseGenerator = {
     text += `👥 **Total Voters:** ${
       stats.totalVoters?.toLocaleString() || "N/A"
     }\n`;
-    text += `📁 **Sessions:** ${stats.totalSessions || "N/A"}\n`;
+    text += `📁 **Voter Lists:** ${stats.totalSessions || "N/A"}\n`;
     text += `👤 **Users:** ${stats.totalUsers || "N/A"}\n`;
 
     if (stats.genderDistribution) {
@@ -519,8 +519,8 @@ const ResponseGenerator = {
     ];
 
     if (isAdmin) {
-      actions.push(this.generateLink("/upload", "📤 Upload PDF"));
-      actions.push(this.generateLink("/sessions", "📁 Sessions"));
+      actions.push(this.generateLink("/upload", "📤 Upload Voter List"));
+      actions.push(this.generateLink("/sessions", "📁 Voter Lists"));
       actions.push(this.generateLink("/admin/dashboard", "📊 Dashboard"));
       actions.push(this.generateLink("/admin/users", "👥 Manage Users"));
       actions.push(this.generateLink("/admin/stats", "📈 Statistics"));
@@ -531,10 +531,10 @@ const ResponseGenerator = {
 
   getUploadResponse() {
     return {
-      text: `📤 **PDF Upload Instructions**\n\n1. Go to the Upload page\n2. Select your voter list PDF\n3. Wait for OCR processing\n4. View extracted voters in Sessions\n\n**Supported formats:** PDF files with clear voter list tables`,
+      text: `📤 **Voter List Upload Instructions**\n\n1. Go to the Upload page\n2. Select your voter list PDF\n3. Wait for OCR processing\n4. View extracted voters in Voter Lists\n\n**Supported formats:** PDF files with clear voter list tables`,
       actions: [
         this.generateLink("/upload", "📤 Go to Upload"),
-        this.generateLink("/sessions", "📁 View Sessions"),
+        this.generateLink("/sessions", "📁 View Voter Lists"),
       ],
     };
   },
@@ -560,25 +560,25 @@ const ResponseGenerator = {
 
     if (!sessions || sessions.length === 0) {
       return {
-        text: `📁 No upload sessions found. Upload a PDF to get started!`,
+        text: `📁 No voter lists found. Upload a voter list to get started!`,
         actions: [
-          this.generateLink("/upload", "📤 Upload PDF"),
-          this.generateLink("/sessions", "📁 Sessions Page"),
+          this.generateLink("/upload", "📤 Upload Voter List"),
+          this.generateLink("/sessions", "📁 Voter Lists Page"),
         ],
       };
     }
 
-    let text = `📁 **Recent Sessions** (${sessions.length} total)\n\n`;
+    let text = `📁 **Recent Voter Lists** (${sessions.length} total)\n\n`;
 
     sessions.slice(0, 3).forEach((s, i) => {
-      text += `${i + 1}. **${s.filename || s.name || "Session"}**\n`;
+      text += `${i + 1}. **${s.filename || s.name || "Voter List"}**\n`;
       text += `   • Voters: ${s.voter_count || 0}\n`;
       text += `   • Status: ${s.status || "Unknown"}\n\n`;
     });
 
     return {
       text,
-      actions: [this.generateLink("/sessions", "📁 View All Sessions")],
+      actions: [this.generateLink("/sessions", "📁 View All Voter Lists")],
     };
   },
 };
@@ -603,9 +603,9 @@ export default function ChatBot() {
     if (role === "admin") {
       return [
         "Show system statistics",
-        "View recent sessions",
+        "View recent voter lists",
         "Search for voters",
-        "How to upload PDF?",
+        "How to upload voter list?",
       ];
     }
 
@@ -624,7 +624,7 @@ export default function ChatBot() {
     } else if (role === "admin") {
       greeting = `Hello${
         name ? ` ${name}` : ""
-      }! 👋 I'm your secure Admin Assistant. I can help you search voters, view statistics, manage sessions, and more!`;
+      }! 👋 I'm your secure Admin Assistant. I can help you search voters, view statistics, manage voter lists, and more!`;
     } else {
       greeting = `Hello${
         name ? ` ${name}` : ""
@@ -680,7 +680,7 @@ export default function ChatBot() {
 ## ROLE-BASED RESTRICTIONS:
 ${
   isAdmin
-    ? "- User is ADMIN: Can discuss uploads, sessions, user management, statistics"
+    ? "- User is ADMIN: Can discuss uploads, voter lists, user management, statistics"
     : "- User is REGULAR USER: Can ONLY discuss voter search and printing. Do NOT mention admin features."
 }
 
@@ -698,7 +698,7 @@ ${
   isAdmin
     ? `
 - Upload: ${FRONTEND_URL}/upload
-- Sessions: ${FRONTEND_URL}/sessions
+- Voter Lists: ${FRONTEND_URL}/sessions
 - Dashboard: ${FRONTEND_URL}/admin/dashboard
 - Statistics: ${FRONTEND_URL}/admin/stats
 - Users: ${FRONTEND_URL}/admin/users`
