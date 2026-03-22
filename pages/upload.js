@@ -1,5 +1,6 @@
 import ProtectedRoute from "../components/ProtectedRoute";
 import UploadForm from "../components/UploadForm";
+import ApiEngineStatus from "../components/ApiEngineStatus";
 
 export default function UploadPage() {
   return (
@@ -16,6 +17,7 @@ export default function UploadPage() {
           </div>
         </div>
         <UploadForm />
+        <ApiEngineStatus showSummary={false} pollInterval={5000} />
       </div>
     </ProtectedRoute>
   );

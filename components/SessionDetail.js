@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import VoterFilters from "./VoterFilters";
 import VoterTable from "./VoterTable";
-import ApiEngineStatus from "./ApiEngineStatus";
+import toast from "react-hot-toast";
 import {
   getSession,
   getSessionStatus,
@@ -13,6 +13,10 @@ import {
   resumeSession,
   renameSession,
 } from "../lib/api";
+import {
+  extractAutomaticRetryRounds,
+  formatAutomaticRetryRounds,
+} from "../lib/engineStatusMapper";
 
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
@@ -280,7 +284,12 @@ export default function SessionDetail() {
   const handleResume = async () => {
     setActionLoading("resume");
     try {
-      await resumeSession(id);
+      const response = await resumeSession(id);
+      const rounds = extractAutomaticRetryRounds(response);
+      const retryText = formatAutomaticRetryRounds(rounds);
+      toast.success(
+        retryText ? `Session resumed. ${retryText}` : "Session resumed.",
+      );
       fetchSession();
       fetchStatus();
     } catch (err) {
@@ -392,17 +401,6 @@ export default function SessionDetail() {
           onRename={handleRename}
         />
       )}
-
-      {/* API Engine Status */}
-      <ApiEngineStatus
-        sessionId={id}
-        sessionStatus={statusInfo?.statusText || session?.status}
-        onResume={() => {
-          fetchSession();
-          fetchStatus();
-          fetchVoters({});
-        }}
-      />
 
       {errorSession && (
         <div className="p-3 bg-rose-900/50 text-rose-100 rounded-lg border border-rose-700">
@@ -539,7 +537,13 @@ function normalizeStatus(payload) {
   const percent = total
     ? Math.min(100, Math.round((processed / total) * 100))
     : 0;
-  return { statusText, processed, total, percent, voterCount };
+  return {
+    statusText,
+    processed,
+    total,
+    percent,
+    voterCount,
+  };
 }
 
 const RELIGION_ICONS = {

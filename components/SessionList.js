@@ -10,6 +10,10 @@ import {
   electionResultsAPI,
 } from "../lib/api";
 import toast from "react-hot-toast";
+import {
+  extractAutomaticRetryRounds,
+  formatAutomaticRetryRounds,
+} from "../lib/engineStatusMapper";
 
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
@@ -78,9 +82,11 @@ export default function SessionList() {
             ),
           ).then((results) => {
             const next = {};
+
             results.filter(Boolean).forEach(({ id, payload }) => {
               next[id] = normalizeProgress(payload);
             });
+
             setProgressMap((prev) => ({ ...prev, ...next }));
           });
         }
@@ -138,7 +144,12 @@ export default function SessionList() {
   const handleResume = async (id) => {
     setActionLoading(id);
     try {
-      await resumeSession(id);
+      const response = await resumeSession(id);
+      const rounds = extractAutomaticRetryRounds(response);
+      const retryText = formatAutomaticRetryRounds(rounds);
+      toast.success(
+        retryText ? `Session resumed. ${retryText}` : "Session resumed.",
+      );
       load();
     } catch (err) {
       setError(err.message || "Failed to resume session");

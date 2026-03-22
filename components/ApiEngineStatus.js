@@ -1,66 +1,42 @@
-import { useEffect, useState, useCallback } from "react";
-import { getApiKeysStatus, resetApiKeys, resumeSession } from "../lib/api";
-
-const ENGINE_NAMES = [
-  "Alpha",
-  "Beta",
-  "Gamma",
-  "Delta",
-  "Epsilon",
-  "Zeta",
-  "Eta",
-];
+import { useEffect, useMemo, useState } from "react";
+import toast from "react-hot-toast";
+import { resetApiKeys, resumeSession } from "../lib/api";
+import { useEngineStatusPolling } from "../lib/useEngineStatusPolling";
+import {
+  extractAutomaticRetryRounds,
+  formatAutomaticRetryRounds,
+  isProcessingSessionStatus,
+} from "../lib/engineStatusMapper";
 
 export default function ApiEngineStatus({
   sessionId,
   sessionStatus,
   onResume,
+  onStatusChange,
   pollInterval = 5000,
   showSummary = false,
 }) {
-  const [apiStatus, setApiStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [resetting, setResetting] = useState(false);
   const [resuming, setResuming] = useState(false);
-  const [expanded, setExpanded] = useState(false);
 
-  const fetchStatus = useCallback(async (signal) => {
-    try {
-      const data = await getApiKeysStatus(signal);
-      setApiStatus(data);
-      setError("");
-    } catch (err) {
-      if (err.name === "AbortError") return;
-      // Silent fail - API might not support this endpoint
-      setError("");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { statusSnapshot, loading, pollError, isPolling } =
+    useEngineStatusPolling({
+      sessionId,
+      sessionStatus,
+      enabled: true,
+      pollIntervalMs: pollInterval,
+    });
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetchStatus(controller.signal);
-
-    // Poll for status updates
-    const interval = setInterval(() => {
-      fetchStatus(controller.signal);
-    }, pollInterval);
-
-    return () => {
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, [fetchStatus, pollInterval]);
+    if (statusSnapshot) onStatusChange?.(statusSnapshot);
+  }, [statusSnapshot, onStatusChange]);
 
   const handleReset = async () => {
     setResetting(true);
     try {
       await resetApiKeys();
-      await fetchStatus();
-    } catch (err) {
-      setError("Failed to reset API keys");
+    } catch {
+      // Keep monitor read-only on failures.
     } finally {
       setResetting(false);
     }
@@ -70,355 +46,241 @@ export default function ApiEngineStatus({
     if (!sessionId) return;
     setResuming(true);
     try {
-      await resumeSession(sessionId);
+      const response = await resumeSession(sessionId);
+      const rounds = extractAutomaticRetryRounds(response);
+      const retryText = formatAutomaticRetryRounds(rounds);
+      toast.success(
+        retryText ? `Session resumed. ${retryText}` : "Session resumed.",
+      );
       onResume?.();
-    } catch (err) {
-      setError("Failed to resume session");
+    } catch {
+      // Parent handles toast/errors for action calls.
     } finally {
       setResuming(false);
     }
   };
 
-  // If no API status data available, show minimal UI
-  if (!apiStatus && !loading) {
-    return null;
-  }
+  if (!statusSnapshot && !loading) return null;
 
-  const keys = apiStatus?.keys || apiStatus?.engines || [];
-  const activeCount = keys.filter(
-    (k) => k.status === "active" && !k.busy
-  ).length;
-  const busyCount = keys.filter((k) => k.status === "active" && k.busy).length;
-  const exhaustedCount = keys.filter((k) => k.status === "exhausted").length;
-  const rateLimitedCount = keys.filter(
-    (k) => k.status === "rate_limited"
-  ).length;
-  const currentKey = apiStatus?.currentKey || apiStatus?.activeKey;
+  const keys = statusSnapshot?.engines || [];
+  const totalEngines = statusSnapshot?.totalEngines || 0;
+  const activeEngines = statusSnapshot?.activeEngines || 0;
+  const busyEngines = statusSnapshot?.busyEngines || 0;
+  const exhaustedEngines = statusSnapshot?.exhaustedEngines || 0;
+  const rateLimitedEngines = statusSnapshot?.rateLimitedEngines || 0;
+  const activeDispatchTier = statusSnapshot?.activeDispatchTier || "free";
+
+  const pools = useMemo(() => {
+    if (statusSnapshot?.pools?.free && statusSnapshot?.pools?.paid) {
+      return statusSnapshot.pools;
+    }
+
+    const next = {
+      free: {
+        total: 0,
+        active: 0,
+        rateLimited: 0,
+        exhausted: 0,
+        busy: 0,
+        available: 0,
+      },
+      paid: {
+        total: 0,
+        active: 0,
+        rateLimited: 0,
+        exhausted: 0,
+        busy: 0,
+        available: 0,
+      },
+    };
+
+    keys.forEach((engine) => {
+      const tier = engine.tier === "paid" ? "paid" : "free";
+      next[tier].total += 1;
+      if (engine.status === "active") next[tier].active += 1;
+      if (engine.status === "rate_limited") next[tier].rateLimited += 1;
+      if (engine.status === "exhausted") next[tier].exhausted += 1;
+      if (engine.busy) next[tier].busy += 1;
+      if (engine.status === "active" && !engine.busy) next[tier].available += 1;
+    });
+
+    return next;
+  }, [keys, statusSnapshot?.pools]);
+
   const isPaused =
     sessionStatus?.toLowerCase?.()?.includes("paused") ||
-    sessionStatus?.toLowerCase?.()?.includes("stopped") ||
-    apiStatus?.sessionPaused;
-  const lastPage = apiStatus?.lastProcessedPage || apiStatus?.stoppedAtPage;
+    sessionStatus?.toLowerCase?.()?.includes("stopped");
 
-  // New metrics from backend 2.0/2.1
-  const totalEngines = apiStatus?.totalEngines || keys.length;
-  const activeEngines = apiStatus?.activeEngines || activeCount;
-  const busyEngines = apiStatus?.busyEngines || busyCount;
-  const exhaustedEngines = apiStatus?.exhaustedEngines || exhaustedCount;
-  const rateLimitedEngines = apiStatus?.rateLimitedEngines || rateLimitedCount;
-
-  // Show summary dashboard if requested (for admin pages)
-  if (showSummary) {
-    return (
-      <div className="bg-ink-200 rounded-xl shadow-lg p-6 border border-ink-400">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            <span>🚀</span> API Engines
-          </h2>
+  return (
+    <div className="card space-y-4 border border-ink-400/50">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-100">
+            Gemini Engine Monitor
+          </h3>
+          <p className="text-sm text-slate-300">
+            Free pool is used first. Paid pool activates only when free is
+            unavailable.
+          </p>
+        </div>
+        {showSummary && (
           <button
             onClick={handleReset}
             disabled={resetting || exhaustedEngines === 0}
-            className="px-4 py-2 rounded-lg bg-neon-500 text-white font-semibold hover:bg-neon-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            className="btn btn-secondary"
           >
-            {resetting ? (
-              <>
-                <span className="animate-spin">⏳</span>
-                Resetting...
-              </>
-            ) : (
-              <>
-                <span>🔄</span>
-                Reset All
-              </>
-            )}
+            {resetting ? "Resetting..." : "Reset Engine State"}
           </button>
-        </div>
-
-        {/* Summary Stats */}
-        <div className="grid grid-cols-5 gap-3 mb-6">
-          <div className="bg-blue-500/20 border border-blue-400/30 p-4 rounded-xl text-center">
-            <div className="text-3xl font-bold text-blue-400">
-              {totalEngines}
-            </div>
-            <div className="text-sm text-slate-400">Total</div>
-          </div>
-          <div className="bg-emerald-500/20 border border-emerald-400/30 p-4 rounded-xl text-center">
-            <div className="text-3xl font-bold text-emerald-400">
-              {activeEngines}
-            </div>
-            <div className="text-sm text-slate-400">Active</div>
-          </div>
-          <div className="bg-amber-500/20 border border-amber-400/30 p-4 rounded-xl text-center">
-            <div className="text-3xl font-bold text-amber-400">
-              {busyEngines}
-            </div>
-            <div className="text-sm text-slate-400">Busy</div>
-          </div>
-          <div className="bg-orange-500/20 border border-orange-400/30 p-4 rounded-xl text-center">
-            <div className="text-3xl font-bold text-orange-400">
-              {rateLimitedEngines}
-            </div>
-            <div className="text-sm text-slate-400">Rate Limited</div>
-          </div>
-          <div className="bg-rose-500/20 border border-rose-400/30 p-4 rounded-xl text-center">
-            <div className="text-3xl font-bold text-rose-400">
-              {exhaustedEngines}
-            </div>
-            <div className="text-sm text-slate-400">Exhausted</div>
-          </div>
-        </div>
-
-        {/* Engine Grid - 7 engines in a row */}
-        <div className="grid grid-cols-7 gap-2">
-          {keys.map((engine, idx) => {
-            const engineId = engine.engineId || idx + 1;
-            const isBusy = engine.busy;
-            const isActive = engine.status === "active";
-            const isExhausted = engine.status === "exhausted";
-            const isRateLimited = engine.status === "rate_limited";
-            const processed =
-              engine.metrics?.engineProcessed || engine.requests || 0;
-
-            return (
-              <div
-                key={engineId}
-                className={`p-3 rounded-lg text-center border-2 transition-all ${
-                  isExhausted
-                    ? "bg-rose-900/30 border-rose-400/50"
-                    : isRateLimited
-                    ? "bg-orange-900/30 border-orange-400/50"
-                    : isBusy
-                    ? "bg-amber-900/30 border-amber-400/50 animate-pulse"
-                    : isActive
-                    ? "bg-emerald-900/30 border-emerald-400/50"
-                    : "bg-slate-800/30 border-slate-600/50"
-                }`}
-              >
-                <div className="font-bold text-slate-200">#{engineId}</div>
-                <div className="text-xl mt-1">
-                  {isExhausted
-                    ? "❌"
-                    : isRateLimited
-                    ? "⏳"
-                    : isBusy
-                    ? "⚡"
-                    : isActive
-                    ? "✅"
-                    : "💤"}
-                </div>
-                <div className="text-xs text-slate-400 mt-1">
-                  {processed} done
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {error && (
-          <div className="mt-4 p-3 bg-rose-900/30 border border-rose-600 rounded-lg text-rose-200 text-sm">
-            {error}
-          </div>
         )}
       </div>
-    );
-  }
 
-  return (
-    <div className="api-engine-panel">
-      {/* Header with toggle */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="api-engine-header"
-      >
-        <div className="flex items-center gap-3">
-          <span className="text-xl">⚡</span>
-          <div>
-            <h3 className="text-sm font-semibold text-slate-100">
-              Gemini API Engines
-            </h3>
-            <p className="text-xs text-slate-400">
-              {activeCount} active • {exhaustedCount} exhausted •{" "}
-              {keys.length - activeCount - exhaustedCount} standby
-            </p>
-          </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <MetricBadge
+          label="Current Tier"
+          value={activeDispatchTier === "paid" ? "PAID" : "FREE"}
+          className={
+            activeDispatchTier === "paid"
+              ? "border-amber-500/40 bg-amber-600/10 text-amber-200"
+              : "border-emerald-500/40 bg-emerald-600/10 text-emerald-200"
+          }
+        />
+        <MetricBadge
+          label="Free Pool"
+          value={`A ${pools.free.available} | AC ${pools.free.active} | RL ${pools.free.rateLimited} | EX ${pools.free.exhausted}`}
+          className="border-blue-500/40 bg-blue-600/10 text-blue-100"
+        />
+        <MetricBadge
+          label="Paid Pool"
+          value={`A ${pools.paid.available} | AC ${pools.paid.active} | RL ${pools.paid.rateLimited} | EX ${pools.paid.exhausted}`}
+          className="border-violet-500/40 bg-violet-600/10 text-violet-100"
+        />
+      </div>
+
+      {activeDispatchTier === "paid" && (
+        <div className="rounded-lg border border-amber-500/50 bg-amber-700/20 px-4 py-3 text-sm text-amber-100">
+          Paid Gemini fallback is active. Free pool is unavailable.
         </div>
-        <div className="flex items-center gap-3">
-          {/* Mini status indicators */}
-          <div className="flex items-center gap-1">
-            {keys.slice(0, 7).map((key, idx) => (
-              <div
-                key={idx}
-                className={`engine-dot ${
-                  key.status === "active"
-                    ? "engine-dot-active"
-                    : key.status === "exhausted"
-                    ? "engine-dot-exhausted"
-                    : "engine-dot-standby"
-                } ${
-                  currentKey === idx || currentKey === key.id
-                    ? "engine-dot-current"
-                    : ""
-                }`}
-                title={`Engine ${ENGINE_NAMES[idx] || idx + 1}: ${key.status}`}
-              />
-            ))}
-          </div>
-          <span
-            className={`text-slate-400 transition-transform ${
-              expanded ? "rotate-180" : ""
-            }`}
-          >
-            ▼
-          </span>
+      )}
+
+      {pollError && (
+        <div className="rounded-lg border border-rose-500/40 bg-rose-600/10 px-4 py-3 text-sm text-rose-200">
+          Unable to refresh engine status. Retrying with backoff.
         </div>
-      </button>
+      )}
 
-      {/* Expanded content */}
-      {expanded && (
-        <div className="api-engine-content">
-          {/* Current Engine Indicator */}
-          {currentKey !== undefined && currentKey !== null && (
-            <div className="current-engine-indicator">
-              <span className="current-engine-icon">🔥</span>
-              <div>
-                <span className="text-xs text-slate-400">Currently Using</span>
-                <span className="current-engine-name">
-                  Engine {ENGINE_NAMES[currentKey] || currentKey + 1}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Engine Grid */}
-          <div className="engine-grid">
-            {keys.map((key, idx) => {
-              const isCurrent = currentKey === idx || currentKey === key.id;
-              const isActive = key.status === "active";
-              const isExhausted = key.status === "exhausted";
-
-              return (
-                <div
-                  key={idx}
-                  className={`engine-card ${
-                    isExhausted
-                      ? "engine-card-exhausted"
-                      : isActive
-                      ? "engine-card-active"
-                      : "engine-card-standby"
-                  } ${isCurrent ? "engine-card-current" : ""}`}
+      {keys.length > 0 && (
+        <div className="table-scroll border border-ink-400/40 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-ink-100/80 text-slate-300">
+              <tr>
+                <th className="px-3 py-2 text-left">Engine</th>
+                <th className="px-3 py-2 text-left">Tier</th>
+                <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Busy</th>
+                <th className="px-3 py-2 text-left">Requests</th>
+                <th className="px-3 py-2 text-left">Success</th>
+                <th className="px-3 py-2 text-left">Key Preview</th>
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((engine) => (
+                <tr
+                  key={engine.engineId}
+                  className="border-t border-ink-400/30"
                 >
-                  <div className="engine-card-header">
-                    <span className="engine-card-icon">
-                      {isExhausted ? "🔴" : isActive ? "🟢" : "🟡"}
+                  <td className="px-3 py-2 text-slate-100 font-semibold">
+                    #{engine.engineId}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className="badge border-ink-400/60 bg-ink-100/40 text-slate-200">
+                      {engine.tier === "paid" ? "PAID" : "FREE"}
                     </span>
-                    <span className="engine-card-name">
-                      {ENGINE_NAMES[idx] || `Key ${idx + 1}`}
+                  </td>
+                  <td className="px-3 py-2">
+                    <StatusBadge status={engine.status} />
+                  </td>
+                  <td className="px-3 py-2 text-slate-200">
+                    <span className="inline-flex items-center gap-2">
+                      {engine.busy ? (
+                        <span className="h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse" />
+                      ) : (
+                        <span className="h-2.5 w-2.5 rounded-full bg-slate-500" />
+                      )}
+                      {engine.busy ? "Yes" : "No"}
                     </span>
-                    {isCurrent && (
-                      <span className="engine-current-badge">IN USE</span>
-                    )}
-                  </div>
-                  <div className="engine-card-status">
-                    {isExhausted
-                      ? "Quota Exhausted"
-                      : isActive
-                      ? "Ready"
-                      : "Standby"}
-                  </div>
-                  {key.usage !== undefined && (
-                    <div className="engine-usage">
-                      <div className="engine-usage-bar">
-                        <div
-                          className="engine-usage-fill"
-                          style={{
-                            width: `${Math.min(100, key.usage || 0)}%`,
-                          }}
-                        />
-                      </div>
-                      <span className="engine-usage-text">
-                        {key.usage?.toFixed?.(0) || 0}% used
-                      </span>
-                    </div>
-                  )}
-                  {key.requests !== undefined && (
-                    <div className="text-xs text-slate-400">
-                      {key.requests} requests
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Paused Session Alert */}
-          {isPaused && (
-            <div className="paused-alert">
-              <div className="paused-alert-content">
-                <span className="text-2xl">⏸️</span>
-                <div>
-                  <h4 className="text-sm font-semibold text-amber-100">
-                    Session Paused
-                  </h4>
-                  <p className="text-xs text-amber-200/80">
-                    All API keys exhausted. Processing stopped at page{" "}
-                    {lastPage || "unknown"}.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={handleResume}
-                disabled={resuming || activeCount === 0}
-                className="resume-btn"
-              >
-                {resuming ? (
-                  <>
-                    <span className="resume-spinner" />
-                    Resuming...
-                  </>
-                ) : (
-                  <>
-                    <span>▶️</span>
-                    Resume Processing
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="engine-actions">
-            <button
-              onClick={handleReset}
-              disabled={resetting || exhaustedCount === 0}
-              className="reset-keys-btn"
-            >
-              {resetting ? (
-                <>
-                  <span className="reset-spinner" />
-                  Resetting...
-                </>
-              ) : (
-                <>
-                  <span>🔄</span>
-                  Reset All Keys
-                </>
-              )}
-            </button>
-            <div className="text-xs text-slate-400">
-              Auto-switches when a key is exhausted
-            </div>
-          </div>
-
-          {error && <div className="text-sm text-rose-400 mt-2">{error}</div>}
+                  </td>
+                  <td className="px-3 py-2 text-slate-300">
+                    {engine.metrics?.totalRequests ?? 0}
+                  </td>
+                  <td className="px-3 py-2 text-slate-300">
+                    {engine.metrics?.successCount ?? 0}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-300">
+                    {engine.keyPreview || "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* Loading state */}
+      {isPaused && (
+        <div className="rounded-lg border border-amber-600/50 bg-amber-700/20 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-sm text-amber-100">
+            Session is paused. Resume when at least one engine is available.
+          </p>
+          <button
+            onClick={handleResume}
+            disabled={resuming || activeEngines === 0}
+            className="btn bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
+          >
+            {resuming ? "Resuming..." : "Resume Processing"}
+          </button>
+        </div>
+      )}
+
       {loading && (
-        <div className="p-3 text-sm text-slate-400">
-          Loading engine status...
-        </div>
+        <p className="text-sm text-slate-400">Loading engine status...</p>
       )}
+
+      <div className="text-xs text-slate-400 flex items-center justify-between gap-3">
+        <span>
+          Engines: {activeEngines} active, {busyEngines} busy,{" "}
+          {rateLimitedEngines} rate limited, {exhaustedEngines} exhausted,{" "}
+          {totalEngines} total.
+        </span>
+        <span>
+          {isPolling || (!sessionId && !loading)
+            ? `Polling every ${Math.round(pollInterval / 1000)}s`
+            : isProcessingSessionStatus(sessionStatus)
+              ? "Polling paused"
+              : "Snapshot frozen"}
+        </span>
+      </div>
     </div>
   );
+}
+
+function MetricBadge({ label, value, className }) {
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${className}`}>
+      <p className="text-xs uppercase tracking-wide opacity-80">{label}</p>
+      <p className="text-sm font-semibold mt-1">{value}</p>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const normalized = String(status || "unknown").toLowerCase();
+  const className =
+    normalized === "active"
+      ? "bg-emerald-700/30 border-emerald-500/50 text-emerald-200"
+      : normalized === "rate_limited"
+        ? "bg-amber-700/30 border-amber-500/50 text-amber-200"
+        : normalized === "exhausted"
+          ? "bg-rose-700/30 border-rose-500/50 text-rose-200"
+          : "bg-slate-700/30 border-slate-500/50 text-slate-200";
+
+  return <span className={`badge border ${className}`}>{normalized}</span>;
 }

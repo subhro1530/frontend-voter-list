@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { createSession } from "../lib/api";
+import toast from "react-hot-toast";
+import {
+  extractAutomaticRetryRounds,
+  formatAutomaticRetryRounds,
+} from "../lib/engineStatusMapper";
 
 export default function UploadForm({ onCreated }) {
   const router = useRouter();
@@ -32,8 +37,15 @@ export default function UploadForm({ onCreated }) {
     try {
       const res = await createSession(file, apiKey.trim());
       const id = res.sessionId || res.session_id || res.id;
+      const rounds = extractAutomaticRetryRounds(res);
+      const retryText = formatAutomaticRetryRounds(rounds);
       setCreatedId(id);
       onCreated?.(id);
+      toast.success(
+        retryText
+          ? `Session created. ${retryText}`
+          : "Session created successfully.",
+      );
       // Automatically navigate to the new session
       if (id) {
         router.push(`/sessions/${id}`);
