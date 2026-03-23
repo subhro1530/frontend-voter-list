@@ -13,6 +13,8 @@ export interface EngineStatusItem {
   busy: boolean;
   keyPreview: string;
   metrics: EngineMetrics;
+  recoveryTimeMs?: number;
+  recoveryAt?: string | null;
 }
 
 export interface EnginePoolSnapshot {
@@ -32,11 +34,18 @@ export interface ApiKeysStatusResponse {
   busyEngines: number;
   availableEngines: number;
   activeDispatchTier: DispatchTier;
+  updatedAt?: string;
+  allExhausted?: boolean;
   pools: {
     free: EnginePoolSnapshot;
     paid: EnginePoolSnapshot;
   };
   engines: EngineStatusItem[];
+}
+
+export interface ApiKeysDispatchStatusResponse {
+  activeDispatchTier?: DispatchTier;
+  paidFallbackActive: boolean;
 }
 
 export interface SessionStatusSnapshot {

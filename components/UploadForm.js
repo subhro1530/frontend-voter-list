@@ -6,6 +6,8 @@ import {
   extractAutomaticRetryRounds,
   formatAutomaticRetryRounds,
 } from "../lib/engineStatusMapper";
+import DispatchModeSelector from "./DispatchModeSelector";
+import { readStoredDispatchMode } from "../lib/dispatchMode";
 
 export default function UploadForm({ onCreated }) {
   const router = useRouter();
@@ -14,6 +16,11 @@ export default function UploadForm({ onCreated }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [createdId, setCreatedId] = useState("");
+  const [dispatchMode, setDispatchMode] = useState("auto");
+
+  useEffect(() => {
+    setDispatchMode(readStoredDispatchMode());
+  }, []);
 
   useEffect(() => {
     const stored =
@@ -35,7 +42,7 @@ export default function UploadForm({ onCreated }) {
     setLoading(true);
     setCreatedId("");
     try {
-      const res = await createSession(file, apiKey.trim());
+      const res = await createSession(file, apiKey.trim(), dispatchMode);
       const id = res.sessionId || res.session_id || res.id;
       const rounds = extractAutomaticRetryRounds(res);
       const retryText = formatAutomaticRetryRounds(rounds);
@@ -74,6 +81,7 @@ export default function UploadForm({ onCreated }) {
         </span>
       </div>
       <form className="space-y-3" onSubmit={handleSubmit}>
+        <DispatchModeSelector value={dispatchMode} onChange={setDispatchMode} />
         <div className="space-y-2">
           <label htmlFor="file">PDF File</label>
           <input

@@ -1,66 +1,58 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { resetApiKeys, resumeSession } from "../lib/api";
 import { useEngineStatusPolling } from "../lib/useEngineStatusPolling";
+import { useAuth } from "../context/AuthContext";
 import {
   extractAutomaticRetryRounds,
+  formatDispatchTierLabel,
   formatAutomaticRetryRounds,
   isProcessingSessionStatus,
 } from "../lib/engineStatusMapper";
+import {
+  getDispatchModeMessage,
+  normalizeDispatchMode,
+} from "../lib/dispatchMode";
 
 export default function ApiEngineStatus({
   sessionId,
   sessionStatus,
   onResume,
   onStatusChange,
-  pollInterval = 5000,
+  onDispatchTierChange,
+  dispatchMode = "auto",
+  pollInterval = 4000,
   showSummary = false,
 }) {
+  const { isAdmin } = useAuth();
   const [resetting, setResetting] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [showEngineTable, setShowEngineTable] = useState(false);
+  const previousTierRef = useRef();
 
-  const { statusSnapshot, loading, pollError, isPolling } =
-    useEngineStatusPolling({
-      sessionId,
-      sessionStatus,
-      enabled: true,
-      pollIntervalMs: pollInterval,
-    });
+  const {
+    statusSnapshot,
+    dispatchTier,
+    paidFallbackActive,
+    loading,
+    pollError,
+    isPolling,
+  } = useEngineStatusPolling({
+    sessionId,
+    sessionStatus,
+    enabled: true,
+    isAdmin,
+    pollIntervalMs: pollInterval,
+  });
 
   useEffect(() => {
     if (statusSnapshot) onStatusChange?.(statusSnapshot);
   }, [statusSnapshot, onStatusChange]);
 
-  const handleReset = async () => {
-    setResetting(true);
-    try {
-      await resetApiKeys();
-    } catch {
-      // Keep monitor read-only on failures.
-    } finally {
-      setResetting(false);
-    }
-  };
-
-  const handleResume = async () => {
-    if (!sessionId) return;
-    setResuming(true);
-    try {
-      const response = await resumeSession(sessionId);
-      const rounds = extractAutomaticRetryRounds(response);
-      const retryText = formatAutomaticRetryRounds(rounds);
-      toast.success(
-        retryText ? `Session resumed. ${retryText}` : "Session resumed.",
-      );
-      onResume?.();
-    } catch {
-      // Parent handles toast/errors for action calls.
-    } finally {
-      setResuming(false);
-    }
-  };
-
-  if (!statusSnapshot && !loading) return null;
+  useEffect(() => {
+    if (!dispatchTier) return;
+    onDispatchTierChange?.(dispatchTier);
+  }, [dispatchTier, onDispatchTierChange]);
 
   const keys = statusSnapshot?.engines || [];
   const totalEngines = statusSnapshot?.totalEngines || 0;
@@ -68,7 +60,23 @@ export default function ApiEngineStatus({
   const busyEngines = statusSnapshot?.busyEngines || 0;
   const exhaustedEngines = statusSnapshot?.exhaustedEngines || 0;
   const rateLimitedEngines = statusSnapshot?.rateLimitedEngines || 0;
-  const activeDispatchTier = statusSnapshot?.activeDispatchTier || "free";
+  const activeDispatchTier =
+    dispatchTier || statusSnapshot?.activeDispatchTier || "free";
+  const fallbackActive = paidFallbackActive || activeDispatchTier === "paid";
+  const allExhausted = Boolean(statusSnapshot?.allExhausted);
+  const normalizedDispatchMode = normalizeDispatchMode(dispatchMode);
+
+  useEffect(() => {
+    const previousTier = previousTierRef.current;
+    if (
+      previousTier === "free" &&
+      activeDispatchTier === "paid" &&
+      isProcessingSessionStatus(sessionStatus)
+    ) {
+      toast("Switched to paid fallback for continuity", { icon: "⚡" });
+    }
+    previousTierRef.current = activeDispatchTier;
+  }, [activeDispatchTier, sessionStatus]);
 
   const pools = useMemo(() => {
     if (statusSnapshot?.pools?.free && statusSnapshot?.pools?.paid) {
@@ -107,6 +115,37 @@ export default function ApiEngineStatus({
     return next;
   }, [keys, statusSnapshot?.pools]);
 
+  const handleReset = async () => {
+    setResetting(true);
+    try {
+      await resetApiKeys();
+    } catch {
+      // Keep monitor read-only on failures.
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (!sessionId) return;
+    setResuming(true);
+    try {
+      const response = await resumeSession(sessionId, normalizedDispatchMode);
+      const rounds = extractAutomaticRetryRounds(response);
+      const retryText = formatAutomaticRetryRounds(rounds);
+      toast.success(
+        retryText ? `Session resumed. ${retryText}` : "Session resumed.",
+      );
+      onResume?.();
+    } catch {
+      // Parent handles toast/errors for action calls.
+    } finally {
+      setResuming(false);
+    }
+  };
+
+  if (!statusSnapshot && !loading) return null;
+
   const isPaused =
     sessionStatus?.toLowerCase?.()?.includes("paused") ||
     sessionStatus?.toLowerCase?.()?.includes("stopped");
@@ -137,9 +176,9 @@ export default function ApiEngineStatus({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <MetricBadge
           label="Current Tier"
-          value={activeDispatchTier === "paid" ? "PAID" : "FREE"}
+          value={formatDispatchTierLabel(activeDispatchTier)}
           className={
-            activeDispatchTier === "paid"
+            fallbackActive
               ? "border-amber-500/40 bg-amber-600/10 text-amber-200"
               : "border-emerald-500/40 bg-emerald-600/10 text-emerald-200"
           }
@@ -156,19 +195,66 @@ export default function ApiEngineStatus({
         />
       </div>
 
-      {activeDispatchTier === "paid" && (
+      <div className="rounded-lg border border-ink-400/40 bg-ink-100/30 px-4 py-3 text-sm text-slate-200">
+        {getDispatchModeMessage(normalizedDispatchMode)}
+      </div>
+
+      <div
+        className={`rounded-lg border px-4 py-3 text-sm ${
+          activeDispatchTier === "paid"
+            ? "border-amber-500/50 bg-amber-700/20 text-amber-100"
+            : "border-emerald-500/50 bg-emerald-700/20 text-emerald-100"
+        }`}
+      >
+        {activeDispatchTier === "paid"
+          ? "FREE pool unavailable. Using PAID fallback pool"
+          : "Using FREE Gemini pool"}
+      </div>
+
+      {fallbackActive && (
         <div className="rounded-lg border border-amber-500/50 bg-amber-700/20 px-4 py-3 text-sm text-amber-100">
           Paid Gemini fallback is active. Free pool is unavailable.
         </div>
       )}
 
-      {pollError && (
-        <div className="rounded-lg border border-rose-500/40 bg-rose-600/10 px-4 py-3 text-sm text-rose-200">
-          Unable to refresh engine status. Retrying with backoff.
+      {rateLimitedEngines > 0 && (
+        <div className="rounded-lg border border-blue-500/40 bg-blue-700/15 px-4 py-3 text-sm text-blue-100">
+          Backend is waiting for key cooldown windows; retries are adaptive.
         </div>
       )}
 
-      {keys.length > 0 && (
+      {allExhausted && (
+        <div className="rounded-lg border border-rose-500/40 bg-rose-700/15 px-4 py-3 text-sm text-rose-100">
+          Wait for quota recovery or add more paid keys.
+        </div>
+      )}
+
+      {normalizedDispatchMode === "free-only" &&
+        (allExhausted || pools.free.available <= 0) && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-700/15 px-4 py-3 text-sm text-amber-100">
+            Switch to Turbo for faster completion.
+          </div>
+        )}
+
+      {pollError && (
+        <div className="rounded-lg border border-rose-500/40 bg-rose-600/10 px-4 py-3 text-sm text-rose-200">
+          Engine status temporarily unavailable
+        </div>
+      )}
+
+      {isAdmin && keys.length > 0 && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowEngineTable((prev) => !prev)}
+          >
+            {showEngineTable ? "Hide Engine Table" : "Show Engine Table"}
+          </button>
+        </div>
+      )}
+
+      {isAdmin && keys.length > 0 && showEngineTable && (
         <div className="table-scroll border border-ink-400/40 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-ink-100/80 text-slate-300">
@@ -179,7 +265,7 @@ export default function ApiEngineStatus({
                 <th className="px-3 py-2 text-left">Busy</th>
                 <th className="px-3 py-2 text-left">Requests</th>
                 <th className="px-3 py-2 text-left">Success</th>
-                <th className="px-3 py-2 text-left">Key Preview</th>
+                <th className="px-3 py-2 text-left">Recovery time</th>
               </tr>
             </thead>
             <tbody>
@@ -215,8 +301,8 @@ export default function ApiEngineStatus({
                   <td className="px-3 py-2 text-slate-300">
                     {engine.metrics?.successCount ?? 0}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-300">
-                    {engine.keyPreview || "-"}
+                  <td className="px-3 py-2 text-slate-300">
+                    {formatRecoveryTime(engine.recoveryTimeMs, engine.status)}
                   </td>
                 </tr>
               ))}
@@ -251,15 +337,21 @@ export default function ApiEngineStatus({
           {totalEngines} total.
         </span>
         <span>
-          {isPolling || (!sessionId && !loading)
+          {isPolling
             ? `Polling every ${Math.round(pollInterval / 1000)}s`
-            : isProcessingSessionStatus(sessionStatus)
-              ? "Polling paused"
-              : "Snapshot frozen"}
+            : "Snapshot frozen"}
         </span>
       </div>
     </div>
   );
+}
+
+function formatRecoveryTime(recoveryTimeMs, status) {
+  if (status !== "rate_limited") return "-";
+  const ms = Number(recoveryTimeMs || 0);
+  if (!Number.isFinite(ms) || ms <= 0) return "Adaptive";
+  const seconds = Math.ceil(ms / 1000);
+  return `${seconds}s`;
 }
 
 function MetricBadge({ label, value, className }) {

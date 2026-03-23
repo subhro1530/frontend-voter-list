@@ -17,7 +17,7 @@ export default function UploadPage() {
           </div>
         </div>
         <UploadForm />
-        <ApiEngineStatus showSummary={false} pollInterval={5000} />
+        <ApiEngineStatus showSummary={false} pollInterval={4000} />
       </div>
     </ProtectedRoute>
   );

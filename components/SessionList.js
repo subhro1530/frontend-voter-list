@@ -12,8 +12,11 @@ import {
 import toast from "react-hot-toast";
 import {
   extractAutomaticRetryRounds,
+  extractDispatchTier,
   formatAutomaticRetryRounds,
 } from "../lib/engineStatusMapper";
+import DispatchModeSelector from "./DispatchModeSelector";
+import { readStoredDispatchMode } from "../lib/dispatchMode";
 
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
@@ -39,6 +42,7 @@ export default function SessionList() {
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState("");
   const [progressMap, setProgressMap] = useState({});
+  const [dispatchTierMap, setDispatchTierMap] = useState({});
   const [renameModal, setRenameModal] = useState(null);
   const [linkedResultState, setLinkedResultState] = useState({
     open: false,
@@ -48,6 +52,27 @@ export default function SessionList() {
     sourceSession: null,
   });
   const [linkedYear, setLinkedYear] = useState("");
+  const [dispatchMode, setDispatchMode] = useState("auto");
+  const [isTabVisible, setIsTabVisible] = useState(() => {
+    if (typeof document === "undefined") return true;
+    return document.visibilityState !== "hidden";
+  });
+
+  useEffect(() => {
+    setDispatchMode(readStoredDispatchMode());
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const onVisibilityChange = () => {
+      setIsTabVisible(document.visibilityState !== "hidden");
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
 
   const load = () => {
     const controller = new AbortController();
@@ -70,24 +95,27 @@ export default function SessionList() {
         }
 
         setSessions(list);
-        const processing = list.filter((s) =>
-          (s?.status || "").toLowerCase().includes("process"),
-        );
-        if (processing.length) {
+        if (list.length) {
           Promise.all(
-            processing.map((s) =>
+            list.map((s) =>
               getSessionStatus(s.id)
                 .then((payload) => ({ id: s.id, payload }))
                 .catch(() => null),
             ),
           ).then((results) => {
             const next = {};
+            const nextDispatchTierMap = {};
 
             results.filter(Boolean).forEach(({ id, payload }) => {
               next[id] = normalizeProgress(payload);
+              const dispatchTier = extractDispatchTier(payload);
+              if (dispatchTier) {
+                nextDispatchTierMap[id] = dispatchTier;
+              }
             });
 
             setProgressMap((prev) => ({ ...prev, ...next }));
+            setDispatchTierMap((prev) => ({ ...prev, ...nextDispatchTierMap }));
           });
         }
       })
@@ -98,8 +126,10 @@ export default function SessionList() {
 
   useEffect(load, []);
 
-  // Auto-refresh every 5 seconds for processing sessions
+  // Auto-refresh every 2 seconds for processing sessions while tab is visible.
   useEffect(() => {
+    if (!isTabVisible) return;
+
     const hasProcessing = sessions.some((s) =>
       (s?.status || "").toLowerCase().includes("process"),
     );
@@ -107,10 +137,10 @@ export default function SessionList() {
 
     const interval = setInterval(() => {
       load();
-    }, 5000);
+    }, 2000);
 
     return () => clearInterval(interval);
-  }, [sessions]);
+  }, [sessions, isTabVisible]);
 
   const handleDelete = async (id) => {
     const session = sessions.find((s) => s.id === id);
@@ -144,7 +174,7 @@ export default function SessionList() {
   const handleResume = async (id) => {
     setActionLoading(id);
     try {
-      const response = await resumeSession(id);
+      const response = await resumeSession(id, dispatchMode);
       const rounds = extractAutomaticRetryRounds(response);
       const retryText = formatAutomaticRetryRounds(rounds);
       toast.success(
@@ -207,9 +237,20 @@ export default function SessionList() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold text-slate-100">Voter Lists</h2>
-        <button className="btn btn-secondary" onClick={load} disabled={loading}>
-          Refresh
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <DispatchModeSelector
+            compact
+            value={dispatchMode}
+            onChange={setDispatchMode}
+          />
+          <button
+            className="btn btn-secondary"
+            onClick={load}
+            disabled={loading}
+          >
+            Refresh
+          </button>
+        </div>
       </div>
       {error && (
         <div className="p-3 bg-rose-900/40 text-rose-100 rounded-lg border border-rose-700">
@@ -231,6 +272,10 @@ export default function SessionList() {
           const isFailed = status.includes("fail");
           const canStop = isProcessing;
           const canResume = isPaused || isFailed;
+          const dispatchTier =
+            dispatchTierMap[s.id] ||
+            extractDispatchTier(s) ||
+            (s.activeDispatchTier === "paid" ? "paid" : "free");
 
           return (
             <div key={s.id} className="card space-y-3">
@@ -301,6 +346,9 @@ export default function SessionList() {
                   </span>
                 </div>
               </div>
+              <p className="text-sm text-slate-300">
+                Dispatch tier used: {dispatchTier === "paid" ? "PAID" : "FREE"}
+              </p>
               {(progressMap[s.id] || isProcessing) && (
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-slate-300">
@@ -342,6 +390,12 @@ export default function SessionList() {
               <div className="flex flex-wrap gap-2">
                 <Link className="btn btn-primary" href={`/sessions/${s.id}`}>
                   View
+                </Link>
+                <Link
+                  className="btn btn-secondary"
+                  href={`/sessions/${s.id}?openMass=1`}
+                >
+                  Mass Generate Slip
                 </Link>
                 <button
                   className="btn btn-secondary"

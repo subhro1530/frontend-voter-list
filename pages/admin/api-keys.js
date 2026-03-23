@@ -49,7 +49,7 @@ function AdminApiKeysContent() {
   const handleReset = async () => {
     if (
       !window.confirm(
-        "Are you sure you want to reset all API keys? This will clear all exhausted status."
+        "Are you sure you want to reset all API keys? This will clear all exhausted status.",
       )
     ) {
       return;
@@ -109,7 +109,7 @@ function AdminApiKeysContent() {
 
   const activePercent = normalizedStatus?.totalKeys
     ? Math.round(
-        (normalizedStatus.activeKeys / normalizedStatus.totalKeys) * 100
+        (normalizedStatus.activeKeys / normalizedStatus.totalKeys) * 100,
       )
     : 0;
 
@@ -142,7 +142,7 @@ function AdminApiKeysContent() {
       )}
 
       {/* Engine Status Dashboard */}
-      <ApiEngineStatus showSummary={true} pollInterval={5000} />
+      <ApiEngineStatus showSummary={true} pollInterval={4000} />
 
       {/* All Exhausted Alert */}
       {normalizedStatus?.allExhausted && (
@@ -215,8 +215,8 @@ function AdminApiKeysContent() {
                   activePercent > 50
                     ? "bg-emerald-500"
                     : activePercent > 25
-                    ? "bg-amber-500"
-                    : "bg-rose-500"
+                      ? "bg-amber-500"
+                      : "bg-rose-500"
                 }`}
                 style={{ width: `${activePercent}%` }}
               />
@@ -261,11 +261,11 @@ function AdminApiKeysContent() {
                               key.status === "active" || key.status === "idle"
                                 ? "bg-emerald-900/50 text-emerald-200 border-emerald-700"
                                 : key.status === "busy" ||
-                                  key.status === "processing"
-                                ? "bg-blue-900/50 text-blue-200 border-blue-700"
-                                : key.status === "rate_limited"
-                                ? "bg-orange-900/50 text-orange-200 border-orange-700"
-                                : "bg-rose-900/50 text-rose-200 border-rose-700"
+                                    key.status === "processing"
+                                  ? "bg-blue-900/50 text-blue-200 border-blue-700"
+                                  : key.status === "rate_limited"
+                                    ? "bg-orange-900/50 text-orange-200 border-orange-700"
+                                    : "bg-rose-900/50 text-rose-200 border-rose-700"
                             }`}
                           >
                             {key.status || "unknown"}
@@ -275,8 +275,8 @@ function AdminApiKeysContent() {
                           {key.requestCount !== undefined
                             ? `${key.requestCount} requests`
                             : key.exhaustedAt
-                            ? new Date(key.exhaustedAt).toLocaleString()
-                            : "—"}
+                              ? new Date(key.exhaustedAt).toLocaleString()
+                              : "—"}
                         </td>
                         <td className="p-3 text-rose-300 text-xs max-w-xs truncate">
                           {key.lastError || "—"}

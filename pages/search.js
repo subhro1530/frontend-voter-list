@@ -10,6 +10,53 @@ import { useAuth } from "../context/AuthContext";
 import { userAPI, getSessions } from "../lib/api";
 import useMassVoterSlipJob from "../lib/useMassVoterSlipJob";
 
+function getPartOptionValue(part) {
+  if (part === null || part === undefined) return "";
+  if (typeof part === "string" || typeof part === "number") {
+    return String(part).trim();
+  }
+
+  const candidates = [
+    part.part_number,
+    part.partNumber,
+    part.part_no,
+    part.partNo,
+    part.booth_no,
+    part.boothNo,
+    part.booth_number,
+    part.boothNumber,
+    part.number,
+    part.value,
+  ];
+
+  for (const candidate of candidates) {
+    const text = String(candidate ?? "").trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function normalizePartOptions(list) {
+  const source = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  const normalized = [];
+
+  source.forEach((item) => {
+    const value = getPartOptionValue(item);
+    if (!value) return;
+
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push(value);
+  });
+
+  return normalized.sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+  );
+}
+
 export default function SearchPage() {
   return (
     <ProtectedRoute allowedRoles={["user", "admin"]}>
@@ -116,7 +163,7 @@ function SearchContent() {
     userAPI
       .getParts(filters.assembly, controller.signal)
       .then((res) => {
-        setParts(res.parts || res || []);
+        setParts(normalizePartOptions(res.parts || res || []));
       })
       .catch((err) => {
         if (err.name !== "AbortError") {
@@ -140,7 +187,7 @@ function SearchContent() {
     userAPI
       .getParts(massSlip.filters.assembly, controller.signal)
       .then((res) => {
-        setMassParts(res.parts || res || []);
+        setMassParts(normalizePartOptions(res.parts || res || []));
       })
       .catch((err) => {
         if (err.name !== "AbortError") {
@@ -354,9 +401,9 @@ function SearchContent() {
                 disabled={!filters.assembly || loadingParts}
               >
                 <option value="">All Parts</option>
-                {parts.map((p) => (
-                  <option key={p.part_number || p} value={p.part_number || p}>
-                    Part {p.part_number || p}
+                {parts.map((partValue) => (
+                  <option key={`search-part-${partValue}`} value={partValue}>
+                    Part {partValue}
                   </option>
                 ))}
               </select>
@@ -552,9 +599,7 @@ function SearchContent() {
                   list="mass-booth-options"
                 />
                 <datalist id="mass-booth-options">
-                  {massParts.map((p) => {
-                    const partValue = String(p.part_number || p || "");
-                    if (!partValue) return null;
+                  {massParts.map((partValue) => {
                     return (
                       <option key={`mass-booth-${partValue}`} value={partValue}>
                         Booth {partValue}

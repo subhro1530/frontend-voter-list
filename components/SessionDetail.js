@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import VoterFilters from "./VoterFilters";
 import VoterTable from "./VoterTable";
+import ApiEngineStatus from "./ApiEngineStatus";
 import toast from "react-hot-toast";
 import {
   getSession,
@@ -12,9 +13,17 @@ import {
   stopSession,
   resumeSession,
   renameSession,
+  patchSessionMetadata,
+  userAPI,
+  electionResultsAPI,
 } from "../lib/api";
+import useSessionMassVoterSlipJob from "../lib/useSessionMassVoterSlipJob";
+import { useAuth } from "../context/AuthContext";
+import DispatchModeSelector from "./DispatchModeSelector";
+import { readStoredDispatchMode } from "../lib/dispatchMode";
 import {
   extractAutomaticRetryRounds,
+  extractDispatchTier,
   formatAutomaticRetryRounds,
 } from "../lib/engineStatusMapper";
 
@@ -104,8 +113,83 @@ function sortVotersBySerial(voterList = []) {
   });
 }
 
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function canonicalizeBooth(value) {
+  const raw = String(value ?? "").toUpperCase();
+  if (!raw) return "";
+  const alnum = raw.replace(/[^A-Z0-9]/g, "");
+  const match = alnum.match(/(\d{1,4}[A-Z]?)/);
+  return match?.[1] || "";
+}
+
+function normalizeAssemblyOptions(list) {
+  const source = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  const normalized = [];
+
+  source.forEach((item) => {
+    const value =
+      typeof item === "string"
+        ? item
+        : firstNonEmpty(item?.name, item?.assembly, item?.value);
+    const text = String(value || "").trim();
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push(text);
+  });
+
+  return normalized.sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" }),
+  );
+}
+
+function normalizePartOptions(list) {
+  const source = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  const normalized = [];
+
+  source.forEach((item) => {
+    const value =
+      typeof item === "string" || typeof item === "number"
+        ? String(item)
+        : firstNonEmpty(
+            item?.part_number,
+            item?.partNumber,
+            item?.part_no,
+            item?.partNo,
+            item?.booth_no,
+            item?.boothNo,
+            item?.booth_number,
+            item?.boothNumber,
+            item?.number,
+            item?.value,
+          );
+
+    const canonical = canonicalizeBooth(value);
+    if (!canonical) return;
+    const key = canonical.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push(canonical);
+  });
+
+  return normalized.sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+  );
+}
+
 export default function SessionDetail() {
   const router = useRouter();
+  const { isAdmin } = useAuth();
   const { id } = router.query;
   const [session, setSession] = useState(null);
   const [voters, setVoters] = useState([]);
@@ -116,10 +200,37 @@ export default function SessionDetail() {
   const voterController = useRef(null);
   const statusController = useRef(null);
   const [statusInfo, setStatusInfo] = useState(null);
+  const [dispatchTierUsed, setDispatchTierUsed] = useState();
   const [religionStats, setReligionStats] = useState(null);
   const [currentFilters, setCurrentFilters] = useState({});
   const [actionLoading, setActionLoading] = useState("");
   const [renameModal, setRenameModal] = useState(false);
+  const [dispatchMode, setDispatchMode] = useState("auto");
+  const [isTabVisible, setIsTabVisible] = useState(() => {
+    if (typeof document === "undefined") return true;
+    return document.visibilityState !== "hidden";
+  });
+  const [fixMetadataOpen, setFixMetadataOpen] = useState(false);
+  const [sessionScopedAssemblies, setSessionScopedAssemblies] = useState([]);
+  const [sessionScopedParts, setSessionScopedParts] = useState([]);
+  const [loadingSessionScopedAssemblies, setLoadingSessionScopedAssemblies] =
+    useState(false);
+  const [loadingSessionScopedParts, setLoadingSessionScopedParts] =
+    useState(false);
+
+  const {
+    sessionMassSlip,
+    startSessionMassSlip,
+    retrySessionMassSlip,
+    downloadSessionMassSlip,
+    isJobActive,
+  } = useSessionMassVoterSlipJob({
+    sessionId: id,
+    session,
+    onWarning: (message) => toast(message, { icon: "⚠️" }),
+    onError: (message) => toast.error(message),
+    onSuccess: (message) => toast.success(message),
+  });
 
   const fetchSession = (signal, { silent } = {}) => {
     if (!id) return;
@@ -163,6 +274,67 @@ export default function SessionDetail() {
       });
   };
 
+  const refreshLinkedElectionData = useCallback(async () => {
+    if (!id) return;
+    try {
+      await electionResultsAPI.getLinkedElectionResultsFromVoterSession(id);
+    } catch {
+      // Keep silent; linking may not exist for all sessions.
+    }
+  }, [id]);
+
+  const loadSessionScopedAssemblies = useCallback(
+    (signal) => {
+      if (!id) return Promise.resolve([]);
+      setLoadingSessionScopedAssemblies(true);
+
+      return userAPI
+        .getAssemblies({ signal, sessionId: id })
+        .then((res) => {
+          const normalized = normalizeAssemblyOptions(
+            res?.assemblies || res || [],
+          );
+          setSessionScopedAssemblies(normalized);
+          return normalized;
+        })
+        .catch((err) => {
+          if (err?.name !== "AbortError") {
+            setSessionScopedAssemblies([]);
+          }
+          return [];
+        })
+        .finally(() => setLoadingSessionScopedAssemblies(false));
+    },
+    [id],
+  );
+
+  const loadSessionScopedParts = useCallback(
+    (assembly, signal) => {
+      const assemblyValue = String(assembly || "").trim();
+      if (!id || !assemblyValue) {
+        setSessionScopedParts([]);
+        return Promise.resolve([]);
+      }
+
+      setLoadingSessionScopedParts(true);
+      return userAPI
+        .getParts(assemblyValue, { signal, sessionId: id })
+        .then((res) => {
+          const normalized = normalizePartOptions(res?.parts || res || []);
+          setSessionScopedParts(normalized);
+          return normalized;
+        })
+        .catch((err) => {
+          if (err?.name !== "AbortError") {
+            setSessionScopedParts([]);
+          }
+          return [];
+        })
+        .finally(() => setLoadingSessionScopedParts(false));
+    },
+    [id],
+  );
+
   const fetchStatus = (signal) => {
     if (!id) return;
     if (statusController.current) statusController.current.abort();
@@ -172,6 +344,8 @@ export default function SessionDetail() {
       .then((payload) => {
         const normalized = normalizeStatus(payload);
         setStatusInfo(normalized);
+        const latestTier = extractDispatchTier(payload);
+        if (latestTier) setDispatchTierUsed(latestTier);
       })
       .catch((err) => {
         if (err.name === "AbortError") return;
@@ -192,10 +366,38 @@ export default function SessionDetail() {
   };
 
   useEffect(() => {
+    setDispatchMode(readStoredDispatchMode());
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const onVisibilityChange = () => {
+      setIsTabVisible(document.visibilityState !== "hidden");
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
     fetchSession(controller.signal);
     fetchStatus(controller.signal);
     fetchReligionStats(controller.signal);
+    loadSessionScopedAssemblies(controller.signal).then((assemblies) => {
+      const currentAssembly = firstNonEmpty(
+        session?.assembly_name,
+        session?.assembly,
+        session?.constituency,
+      );
+      const preferredAssembly = currentAssembly || assemblies?.[0] || "";
+      if (preferredAssembly) {
+        loadSessionScopedParts(preferredAssembly, controller.signal);
+      }
+    });
+
     return () => {
       controller.abort();
       if (statusController.current) statusController.current.abort();
@@ -203,9 +405,28 @@ export default function SessionDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Auto-polling for live status updates (every 5 seconds)
+  useEffect(() => {
+    const assemblyFromSession = firstNonEmpty(
+      session?.assembly_name,
+      session?.assembly,
+      session?.constituency,
+    );
+    if (!assemblyFromSession) return;
+
+    const controller = new AbortController();
+    loadSessionScopedParts(assemblyFromSession, controller.signal);
+    return () => controller.abort();
+  }, [
+    loadSessionScopedParts,
+    session?.assembly,
+    session?.assembly_name,
+    session?.constituency,
+  ]);
+
+  // Auto-polling for live status updates (every 2 seconds while visible)
   useEffect(() => {
     if (!id) return;
+    if (!isTabVisible) return;
 
     // Only poll if session is still processing
     const shouldPoll = () => {
@@ -236,10 +457,16 @@ export default function SessionDetail() {
           .then((res) => setVoters(sortVotersBySerial(res.voters || res)))
           .catch(() => {}); // Silent fail
       }
-    }, 5000); // Poll every 5 seconds
+    }, 2000); // Poll every 2 seconds
 
     return () => clearInterval(pollInterval);
-  }, [id, statusInfo?.statusText, session?.status, currentFilters]);
+  }, [
+    id,
+    isTabVisible,
+    statusInfo?.statusText,
+    session?.status,
+    currentFilters,
+  ]);
 
   const fetchVoters = useCallback(
     (filters) => {
@@ -284,7 +511,7 @@ export default function SessionDetail() {
   const handleResume = async () => {
     setActionLoading("resume");
     try {
-      const response = await resumeSession(id);
+      const response = await resumeSession(id, dispatchMode);
       const rounds = extractAutomaticRetryRounds(response);
       const retryText = formatAutomaticRetryRounds(rounds);
       toast.success(
@@ -321,6 +548,30 @@ export default function SessionDetail() {
   const canStop = isProcessing;
   const canResume = isPaused || isFailed;
 
+  const statusBadgeClass = {
+    idle: "bg-slate-700/60 text-slate-200 border-slate-500/60",
+    queued: "bg-amber-900/50 text-amber-100 border-amber-700/60",
+    processing: "bg-sky-900/50 text-sky-100 border-sky-700/60",
+    completed: "bg-emerald-900/50 text-emerald-100 border-emerald-700/60",
+    failed: "bg-rose-900/50 text-rose-100 border-rose-700/60",
+  };
+
+  const statusLabel = {
+    idle: "Idle",
+    queued: "Queued",
+    processing: "Processing",
+    completed: "Completed",
+    failed: "Failed",
+  };
+
+  const progressPercent =
+    sessionMassSlip.total > 0
+      ? Math.min(
+          100,
+          Math.round((sessionMassSlip.processed / sessionMassSlip.total) * 100),
+        )
+      : 0;
+
   return (
     <div className="space-y-4 text-slate-100">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -348,6 +599,20 @@ export default function SessionDetail() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <DispatchModeSelector
+            compact
+            value={dispatchMode}
+            onChange={setDispatchMode}
+          />
+          {isAdmin && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => setFixMetadataOpen(true)}
+              disabled={!id}
+            >
+              Fix Session Metadata
+            </button>
+          )}
           {/* Stop button */}
           {canStop && (
             <button
@@ -399,6 +664,44 @@ export default function SessionDetail() {
           currentName={session.original_filename}
           onClose={() => setRenameModal(false)}
           onRename={handleRename}
+        />
+      )}
+
+      {fixMetadataOpen && session && isAdmin && (
+        <FixSessionMetadataModal
+          sessionId={id}
+          session={session}
+          assemblies={sessionScopedAssemblies}
+          parts={sessionScopedParts}
+          loadingAssemblies={loadingSessionScopedAssemblies}
+          loadingParts={loadingSessionScopedParts}
+          onAssemblyChange={(assembly, signal) =>
+            loadSessionScopedParts(assembly, signal)
+          }
+          onClose={() => setFixMetadataOpen(false)}
+          onSaved={async (savedMetadata) => {
+            const controller = new AbortController();
+            await Promise.all([
+              loadSessionScopedAssemblies(controller.signal),
+              fetchSession(controller.signal, { silent: true }),
+            ]);
+
+            const refreshedAssembly = firstNonEmpty(
+              savedMetadata?.assemblyName,
+              savedMetadata?.assembly,
+              session?.assembly_name,
+              session?.assembly,
+              session?.constituency,
+            );
+            if (refreshedAssembly) {
+              await loadSessionScopedParts(
+                refreshedAssembly,
+                controller.signal,
+              );
+            }
+
+            await refreshLinkedElectionData();
+          }}
         />
       )}
 
@@ -485,8 +788,20 @@ export default function SessionDetail() {
                 </div>
               </div>
             )}
+            <div className="rounded-lg border border-ink-400/40 bg-ink-100/30 px-3 py-2 text-sm text-slate-200">
+              Dispatch tier used:{" "}
+              {dispatchTierUsed === "paid" ? "PAID" : "FREE"}
+            </div>
           </div>
-          <div className="space-y-3" />
+          <div className="space-y-3">
+            <ApiEngineStatus
+              sessionId={id}
+              sessionStatus={statusInfo?.statusText || session?.status}
+              pollInterval={4000}
+              dispatchMode={dispatchMode}
+              onDispatchTierChange={setDispatchTierUsed}
+            />
+          </div>
         </div>
       )}
 
@@ -499,6 +814,126 @@ export default function SessionDetail() {
           religionStats={religionStats}
         />
       )}
+
+      <div className="card space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-100">
+              Session Mass Voter Slips
+            </h3>
+            <p className="text-sm text-slate-300">
+              Generate voter slips for this exact session without any extra
+              filters.
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Session ID: {sessionMassSlip.sessionId || id || "—"}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Canonical booth: {sessionMassSlip.boothNo || "Not resolved"}
+              {sessionMassSlip.boothSource
+                ? ` (${sessionMassSlip.boothSource})`
+                : ""}
+            </p>
+            {sessionMassSlip.boothName && (
+              <p className="text-xs text-slate-400 mt-1">
+                Booth name: {sessionMassSlip.boothName}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={startSessionMassSlip}
+            disabled={sessionMassSlip.isStarting || isJobActive}
+          >
+            {sessionMassSlip.isStarting
+              ? "Starting..."
+              : "Generate Session Voter Slips PDF"}
+          </button>
+        </div>
+
+        {sessionMassSlip.boothSource === "missing" && (
+          <div className="p-3 rounded-lg border border-amber-700 bg-amber-900/30 text-amber-100 text-sm">
+            Booth number missing for this session. Please verify session file
+            name or reprocess metadata.
+          </div>
+        )}
+
+        {sessionMassSlip.jobId && (
+          <div className="rounded-xl border border-ink-400/50 bg-ink-900/40 p-4 space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-base font-semibold text-slate-100">
+                  Mass Job Progress
+                </h4>
+                <p className="text-xs text-slate-400 mt-1 font-mono">
+                  Job ID: {sessionMassSlip.jobId}
+                </p>
+              </div>
+              <span
+                className={`inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-semibold ${statusBadgeClass[sessionMassSlip.status] || statusBadgeClass.idle}`}
+              >
+                {statusLabel[sessionMassSlip.status] || "Idle"}
+              </span>
+            </div>
+
+            {sessionMassSlip.status === "queued" && (
+              <div className="text-sm text-amber-300">
+                Queued. Waiting to start...
+              </div>
+            )}
+
+            {(sessionMassSlip.status === "processing" ||
+              sessionMassSlip.status === "completed") && (
+              <div>
+                <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
+                  <span>
+                    {sessionMassSlip.processed} / {sessionMassSlip.total}
+                  </span>
+                  <span>{progressPercent}%</span>
+                </div>
+                <div className="h-2.5 rounded-full bg-ink-700/80 overflow-hidden">
+                  <div
+                    className="h-full bg-neon-300 transition-all duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {sessionMassSlip.status === "completed" && (
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={downloadSessionMassSlip}
+                  disabled={sessionMassSlip.isDownloading}
+                >
+                  {sessionMassSlip.isDownloading
+                    ? "Preparing download..."
+                    : "Download PDF"}
+                </button>
+              </div>
+            )}
+
+            {sessionMassSlip.status === "failed" && (
+              <div className="space-y-3">
+                <div className="p-3 rounded-lg border border-rose-700 bg-rose-900/40 text-rose-100">
+                  {sessionMassSlip.error || "Mass generation failed."}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={retrySessionMassSlip}
+                  disabled={sessionMassSlip.isStarting || isJobActive}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <VoterFilters
         disabled={loadingVoters}
@@ -543,6 +978,7 @@ function normalizeStatus(payload) {
     total,
     percent,
     voterCount,
+    dispatchTier: extractDispatchTier(payload),
   };
 }
 
@@ -624,6 +1060,226 @@ function FilteredStatus({ voterCount, totalCount, filters, religionStats }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function FixSessionMetadataModal({
+  sessionId,
+  session,
+  assemblies,
+  parts,
+  loadingAssemblies,
+  loadingParts,
+  onAssemblyChange,
+  onClose,
+  onSaved,
+}) {
+  const [assemblyName, setAssemblyName] = useState(
+    firstNonEmpty(
+      session?.assembly_name,
+      session?.assembly,
+      session?.constituency,
+    ),
+  );
+  const [boothNo, setBoothNo] = useState(
+    firstNonEmpty(
+      canonicalizeBooth(session?.booth_no),
+      canonicalizeBooth(session?.boothNo),
+      canonicalizeBooth(session?.part_number),
+      canonicalizeBooth(session?.partNumber),
+    ),
+  );
+  const [boothName, setBoothName] = useState(
+    firstNonEmpty(session?.booth_name, session?.boothName),
+  );
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const assemblyValue = String(assemblyName || "").trim();
+    if (assemblyValue) {
+      onAssemblyChange(assemblyValue, controller.signal);
+    }
+    return () => controller.abort();
+  }, [assemblyName, onAssemblyChange]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setFormError("");
+    setFieldErrors({});
+
+    const normalizedBooth = canonicalizeBooth(boothNo);
+    const nextErrors = {};
+
+    if (!assemblyName.trim()) {
+      nextErrors.assemblyName = "Assembly name is required.";
+    }
+
+    if (!normalizedBooth) {
+      nextErrors.boothNo = "Booth number is required (example: 7, 119, 119A).";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await patchSessionMetadata(sessionId, {
+        assemblyName: assemblyName.trim(),
+        assembly: assemblyName.trim(),
+        boothNo: normalizedBooth,
+        booth_no: normalizedBooth,
+        boothName: boothName.trim(),
+        booth_name: boothName.trim(),
+      });
+
+      toast.success("Session metadata updated.");
+      await onSaved?.({
+        assemblyName: assemblyName.trim(),
+        assembly: assemblyName.trim(),
+        boothNo: normalizedBooth,
+        boothName: boothName.trim(),
+      });
+      onClose();
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if (status === 400) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          boothNo:
+            err?.message ||
+            "Invalid booth format. Use values like 7, 119, or 119A.",
+        }));
+      } else if (status === 404) {
+        setFormError("Session no longer exists. Please refresh and retry.");
+      } else if (status === 403) {
+        setFormError("You do not have permission to edit session metadata.");
+      } else {
+        setFormError(err?.message || "Failed to update session metadata.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-ink-200 border border-ink-400 rounded-xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+        <div>
+          <h3 className="text-lg font-bold text-slate-100">
+            Fix Session Metadata
+          </h3>
+          <p className="text-xs text-slate-400 mt-1">Session: {sessionId}</p>
+        </div>
+
+        {formError && (
+          <div className="p-3 bg-rose-900/40 text-rose-100 rounded-lg border border-rose-700 text-sm">
+            {formError}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <label
+              htmlFor="fixAssemblyName"
+              className="text-sm font-medium text-slate-200"
+            >
+              Assembly Name
+            </label>
+            <select
+              id="fixAssemblyName"
+              value={assemblyName}
+              onChange={(e) => setAssemblyName(e.target.value)}
+              className="w-full px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg text-slate-100 placeholder:text-slate-500"
+              disabled={loadingAssemblies}
+            >
+              <option value="">
+                {loadingAssemblies
+                  ? "Loading session assemblies..."
+                  : "Select assembly"}
+              </option>
+              {assemblies.map((name) => (
+                <option key={`assembly-option-${name}`} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            {fieldErrors.assemblyName && (
+              <p className="text-xs text-rose-300">
+                {fieldErrors.assemblyName}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="fixBoothNo"
+              className="text-sm font-medium text-slate-200"
+            >
+              Booth No
+            </label>
+            <input
+              id="fixBoothNo"
+              type="text"
+              list="session-booth-options"
+              value={boothNo}
+              onChange={(e) => setBoothNo(e.target.value)}
+              placeholder={
+                loadingParts ? "Loading booth options..." : "e.g. 7, 119, 119A"
+              }
+              className="w-full px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg text-slate-100 placeholder:text-slate-500"
+            />
+            <datalist id="session-booth-options">
+              {parts.map((partNo) => (
+                <option key={`booth-option-${partNo}`} value={partNo} />
+              ))}
+            </datalist>
+            {fieldErrors.boothNo && (
+              <p className="text-xs text-rose-300">{fieldErrors.boothNo}</p>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="fixBoothName"
+              className="text-sm font-medium text-slate-200"
+            >
+              Booth Name (optional)
+            </label>
+            <input
+              id="fixBoothName"
+              type="text"
+              value={boothName}
+              onChange={(e) => setBoothName(e.target.value)}
+              placeholder="Optional booth label"
+              className="w-full px-3 py-2 bg-ink-100 border border-ink-400 rounded-lg text-slate-100 placeholder:text-slate-500"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2 border border-ink-400 rounded-lg text-slate-300 hover:bg-ink-100 transition-colors"
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-2 bg-neon-500 text-white rounded-lg hover:bg-neon-400 transition-colors disabled:opacity-50"
+              disabled={saving}
+            >
+              {saving ? "Saving..." : "Save Metadata"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

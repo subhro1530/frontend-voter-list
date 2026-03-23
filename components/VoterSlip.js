@@ -1,6 +1,7 @@
 import { forwardRef, useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { getVoterLocationData } from "../lib/gemini";
+import { resolveVoterPhoto } from "../lib/photoAdapter";
 
 // Get frontend URL from environment
 const FRONTEND_URL =
@@ -297,7 +298,10 @@ export function VoterImage({
     slip: "voter-image-slip",
   };
 
-  const hasImage = voter?.photo_url;
+  const resolvedPhotoUrl = resolveVoterPhoto(voter?.photo_url);
+  const hasImage = Boolean(
+    voter?.photo_url && !String(voter?.photo_url).startsWith("placeholder://"),
+  );
 
   return (
     <div
@@ -306,7 +310,7 @@ export function VoterImage({
     >
       {hasImage ? (
         <img
-          src={voter.photo_url}
+          src={resolvedPhotoUrl}
           alt={voter.name || "Voter"}
           className="voter-image-photo"
           onError={(e) => {
@@ -320,7 +324,7 @@ export function VoterImage({
         style={{ display: hasImage ? "none" : "flex" }}
       >
         <img
-          src="/images/user.png"
+          src="/images/voter-placeholder.png"
           alt="User"
           className="voter-placeholder-img"
         />
