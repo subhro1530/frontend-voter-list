@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/router";
 import {
   deleteSession,
   getSessions,
@@ -37,6 +38,7 @@ const statusIcon = (status) => {
 };
 
 export default function SessionList() {
+  const router = useRouter();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -53,6 +55,7 @@ export default function SessionList() {
   });
   const [linkedYear, setLinkedYear] = useState("");
   const [dispatchMode, setDispatchMode] = useState("auto");
+  const [boothSortOrder, setBoothSortOrder] = useState("none");
   const [isTabVisible, setIsTabVisible] = useState(() => {
     if (typeof document === "undefined") return true;
     return document.visibilityState !== "hidden";
@@ -61,6 +64,24 @@ export default function SessionList() {
   useEffect(() => {
     setDispatchMode(readStoredDispatchMode());
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedOrder =
+      window.localStorage.getItem("session-booth-sort-order") || "none";
+    if (
+      savedOrder === "asc" ||
+      savedOrder === "desc" ||
+      savedOrder === "none"
+    ) {
+      setBoothSortOrder(savedOrder);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("session-booth-sort-order", boothSortOrder);
+  }, [boothSortOrder]);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -125,6 +146,14 @@ export default function SessionList() {
   };
 
   useEffect(load, []);
+
+  useEffect(() => {
+    if (!router?.query?.fromUpload) return;
+    const timer = setTimeout(() => {
+      load();
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [router?.query?.fromUpload]);
 
   // Auto-refresh every 2 seconds for processing sessions while tab is visible.
   useEffect(() => {
@@ -233,11 +262,57 @@ export default function SessionList() {
     }
   };
 
+  const sortedSessions = useMemo(() => {
+    const list = Array.isArray(sessions) ? [...sessions] : [];
+    if (boothSortOrder === "none") {
+      return list;
+    }
+
+    const direction = boothSortOrder === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      const aBooth = extractBoothNumber(a);
+      const bBooth = extractBoothNumber(b);
+
+      const aMissing = Number.isNaN(aBooth);
+      const bMissing = Number.isNaN(bBooth);
+      if (aMissing && bMissing) {
+        return String(a?.id || "").localeCompare(String(b?.id || ""));
+      }
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      if (aBooth !== bBooth) {
+        return (aBooth - bBooth) * direction;
+      }
+
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
+
+    return list;
+  }, [sessions, boothSortOrder]);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold text-slate-100">Voter Lists</h2>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="space-y-1">
+            <label
+              htmlFor="boothSortOrder"
+              className="text-xs text-slate-300 uppercase tracking-wide"
+            >
+              Booth Order
+            </label>
+            <select
+              id="boothSortOrder"
+              value={boothSortOrder}
+              onChange={(e) => setBoothSortOrder(e.target.value)}
+              className="min-w-[170px]"
+            >
+              <option value="none">Default</option>
+              <option value="asc">Booth No (ASC)</option>
+              <option value="desc">Booth No (DESC)</option>
+            </select>
+          </div>
           <DispatchModeSelector
             compact
             value={dispatchMode}
@@ -260,11 +335,11 @@ export default function SessionList() {
       {loading && (
         <div className="p-3 text-slate-300">Loading voter lists…</div>
       )}
-      {!loading && sessions.length === 0 && !error && (
+      {!loading && sortedSessions.length === 0 && !error && (
         <div className="p-3 text-slate-400">No voter lists yet.</div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {sessions.map((s) => {
+        {sortedSessions.map((s) => {
           const status = (s.status || "").toLowerCase();
           const isProcessing = status.includes("process");
           const isPaused =
@@ -470,6 +545,23 @@ export default function SessionList() {
       )}
     </div>
   );
+}
+
+function extractBoothNumber(session) {
+  const raw =
+    session?.booth_no ?? session?.boothNo ?? session?.booth_number ?? null;
+  if (raw === null || raw === undefined || raw === "") return Number.NaN;
+
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : Number.NaN;
+
+  const text = String(raw).trim();
+  const parsed = Number(text);
+  if (Number.isFinite(parsed)) return parsed;
+
+  const prefixMatch = text.match(/\d+/);
+  if (!prefixMatch) return Number.NaN;
+  const prefixNumber = Number(prefixMatch[0]);
+  return Number.isFinite(prefixNumber) ? prefixNumber : Number.NaN;
 }
 
 function RenameModal({ session, onClose, onRename }) {
