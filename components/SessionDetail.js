@@ -27,6 +27,37 @@ import {
   formatAutomaticRetryRounds,
 } from "../lib/engineStatusMapper";
 
+const VOTER_FILTER_KEYS = [
+  "voterId",
+  "relationName",
+  "partNumber",
+  "houseNumber",
+  "serialNumber",
+  "minAge",
+  "maxAge",
+  "name",
+  "section",
+  "assembly",
+  "gender",
+  "religion",
+];
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function sanitizeFilterPayload(raw = {}) {
+  const output = {};
+  VOTER_FILTER_KEYS.forEach((key) => {
+    const value = raw?.[key];
+    if (value === "" || value === undefined || value === null) return;
+    output[key] = value;
+  });
+  return output;
+}
+
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
   if (key.includes("fail")) return "status-failed";
@@ -198,11 +229,20 @@ export default function SessionDetail() {
   const [errorSession, setErrorSession] = useState("");
   const [errorVoters, setErrorVoters] = useState("");
   const voterController = useRef(null);
+  const voterRequestSeqRef = useRef(0);
+  const lastVoterQueryRef = useRef({ filters: {}, page: 1, limit: 25 });
+  const initializedFromQueryRef = useRef(false);
   const statusController = useRef(null);
   const [statusInfo, setStatusInfo] = useState(null);
   const [dispatchTierUsed, setDispatchTierUsed] = useState();
   const [religionStats, setReligionStats] = useState(null);
   const [currentFilters, setCurrentFilters] = useState({});
+  const [voterPagination, setVoterPagination] = useState({
+    page: 1,
+    limit: 25,
+    total: 0,
+    totalPages: 0,
+  });
   const [actionLoading, setActionLoading] = useState("");
   const [renameModal, setRenameModal] = useState(false);
   const [dispatchMode, setDispatchMode] = useState("auto");
@@ -450,50 +490,165 @@ export default function SessionDetail() {
       // Silent fetch - no loading spinners
       fetchSession(controller.signal, { silent: true });
       fetchStatus(controller.signal);
-
-      // Also refresh voters silently if filters are empty
-      if (Object.keys(currentFilters).length === 0) {
-        getSessionVoters(id, {}, controller.signal)
-          .then((res) => setVoters(sortVotersBySerial(res.voters || res)))
-          .catch(() => {}); // Silent fail
-      }
     }, 2000); // Poll every 2 seconds
 
     return () => clearInterval(pollInterval);
-  }, [
-    id,
-    isTabVisible,
-    statusInfo?.statusText,
-    session?.status,
-    currentFilters,
-  ]);
+  }, [id, isTabVisible, statusInfo?.statusText, session?.status]);
 
-  const fetchVoters = useCallback(
-    (filters) => {
-      if (!id) return;
-      if (voterController.current) voterController.current.abort();
-      const controller = new AbortController();
-      voterController.current = controller;
-      setLoadingVoters(true);
-      setErrorVoters("");
-      setCurrentFilters(filters);
-      getSessionVoters(id, filters, controller.signal)
-        .then((res) => setVoters(sortVotersBySerial(res.voters || res)))
-        .catch((err) => {
-          if (err.name === "AbortError") return;
-          setErrorVoters(err.message || "Failed to load voters");
-        })
-        .finally(() => setLoadingVoters(false));
+  const syncVoterQueryState = useCallback(
+    (page, limit) => {
+      if (!router?.replace) return;
+      router.replace(
+        {
+          pathname: router.pathname,
+          query: {
+            ...router.query,
+            page: String(page),
+            limit: String(limit),
+          },
+        },
+        undefined,
+        { shallow: true },
+      );
     },
-    [id],
+    [router],
   );
 
+  const fetchVoters = useCallback(
+    ({
+      filters = currentFilters,
+      page = voterPagination.page,
+      limit = voterPagination.limit,
+      syncQuery = true,
+    } = {}) => {
+      if (!id) return;
+      if (voterController.current) voterController.current.abort();
+
+      const controller = new AbortController();
+      voterController.current = controller;
+      const requestId = ++voterRequestSeqRef.current;
+
+      const safeFilters = sanitizeFilterPayload(filters);
+      const safePage = parsePositiveInt(page, 1);
+      const safeLimit = parsePositiveInt(limit, 25);
+      const query = {
+        ...safeFilters,
+        page: safePage,
+        limit: safeLimit,
+      };
+
+      lastVoterQueryRef.current = {
+        filters: safeFilters,
+        page: safePage,
+        limit: safeLimit,
+      };
+
+      setLoadingVoters(true);
+      setErrorVoters("");
+      setCurrentFilters(safeFilters);
+      if (syncQuery) syncVoterQueryState(safePage, safeLimit);
+
+      getSessionVoters(id, query, controller.signal)
+        .then((res) => {
+          if (requestId !== voterRequestSeqRef.current) return;
+
+          const resVoters = res?.voters || [];
+          const resPagination = res?.pagination || {};
+          const normalizedPagination = {
+            page: parsePositiveInt(resPagination.page, safePage),
+            limit: parsePositiveInt(resPagination.limit, safeLimit),
+            total: Number(resPagination.total || resVoters.length || 0),
+            totalPages: Number(resPagination.totalPages || 0),
+          };
+
+          if (
+            normalizedPagination.totalPages > 0 &&
+            normalizedPagination.page > normalizedPagination.totalPages
+          ) {
+            fetchVoters({
+              filters: safeFilters,
+              page: 1,
+              limit: normalizedPagination.limit,
+            });
+            return;
+          }
+
+          setVoters(resVoters);
+          setVoterPagination(normalizedPagination);
+        })
+        .catch((err) => {
+          if (err?.name === "AbortError") return;
+          if (requestId !== voterRequestSeqRef.current) return;
+          setErrorVoters(err.message || "Failed to load voters");
+        })
+        .finally(() => {
+          if (requestId === voterRequestSeqRef.current) {
+            setLoadingVoters(false);
+          }
+        });
+    },
+    [
+      currentFilters,
+      id,
+      router,
+      syncVoterQueryState,
+      voterPagination.limit,
+      voterPagination.page,
+    ],
+  );
+
+  const handleFilterSearch = useCallback(
+    (filters) => {
+      fetchVoters({ filters, page: 1, limit: voterPagination.limit });
+    },
+    [fetchVoters, voterPagination.limit],
+  );
+
+  const handleVoterPageChange = useCallback(
+    (nextPage) => {
+      fetchVoters({ filters: currentFilters, page: nextPage });
+    },
+    [currentFilters, fetchVoters],
+  );
+
+  const handleVoterLimitChange = useCallback(
+    (nextLimit) => {
+      fetchVoters({
+        filters: currentFilters,
+        page: voterPagination.page,
+        limit: nextLimit,
+      });
+    },
+    [currentFilters, fetchVoters, voterPagination.page],
+  );
+
+  const retryVoterFetch = useCallback(() => {
+    const lastQuery = lastVoterQueryRef.current;
+    fetchVoters({
+      filters: lastQuery.filters,
+      page: lastQuery.page,
+      limit: lastQuery.limit,
+    });
+  }, [fetchVoters]);
+
   useEffect(() => {
-    fetchVoters({});
+    if (!router.isReady || initializedFromQueryRef.current) return;
+
+    const initialPage = parsePositiveInt(router.query.page, 1);
+    const initialLimit = parsePositiveInt(router.query.limit, 25);
+    initializedFromQueryRef.current = true;
+
+    fetchVoters({
+      filters: {},
+      page: initialPage,
+      limit: initialLimit,
+      syncQuery: false,
+    });
+
     return () => {
       if (voterController.current) voterController.current.abort();
     };
-  }, [fetchVoters]);
+  }, [fetchVoters, router.isReady, router.query.limit, router.query.page]);
 
   const handleStop = async () => {
     setActionLoading("stop");
@@ -949,11 +1104,19 @@ export default function SessionDetail() {
 
       <VoterFilters
         disabled={loadingVoters}
-        onChange={fetchVoters}
+        onChange={handleFilterSearch}
         religionStats={religionStats}
         activeFilters={currentFilters}
       />
-      <VoterTable voters={voters} loading={loadingVoters} error={errorVoters} />
+      <VoterTable
+        voters={voters}
+        loading={loadingVoters}
+        error={errorVoters}
+        pagination={voterPagination}
+        onPageChange={handleVoterPageChange}
+        onLimitChange={handleVoterLimitChange}
+        onRetry={retryVoterFetch}
+      />
     </div>
   );
 }

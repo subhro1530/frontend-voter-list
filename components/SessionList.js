@@ -19,7 +19,7 @@ import {
 import DispatchModeSelector from "./DispatchModeSelector";
 import { readStoredDispatchMode } from "../lib/dispatchMode";
 
-const PAGE_LIMIT = 10;
+const SKELETON_COUNT = 8;
 const SORT_VALUE = "createdAt:desc";
 const DEBOUNCE_MS = 400;
 
@@ -56,12 +56,6 @@ function toSingleQueryValue(value) {
   return String(value || "");
 }
 
-function parsePageNumber(value) {
-  const n = Number(toSingleQueryValue(value));
-  if (!Number.isFinite(n) || n < 1) return 1;
-  return Math.floor(n);
-}
-
 function parseUrlFilters(query) {
   return {
     boothNo: toSingleQueryValue(query.boothNo),
@@ -74,10 +68,8 @@ function parseUrlFilters(query) {
   };
 }
 
-function buildSessionsQuery(filters, page) {
+function buildSessionsQuery(filters) {
   const query = {
-    page: String(page || 1),
-    limit: String(PAGE_LIMIT),
     sort: SORT_VALUE,
   };
 
@@ -110,49 +102,8 @@ function normalizeSessionListResponse(res) {
         ? res
         : [];
 
-  const totalCandidates = [
-    res?.total,
-    res?.count,
-    res?.totalCount,
-    res?.pagination?.total,
-    res?.meta?.total,
-  ];
-
-  const totalPagesCandidates = [
-    res?.totalPages,
-    res?.pagination?.totalPages,
-    res?.meta?.totalPages,
-    res?.pages,
-  ];
-
-  const hasNextCandidates = [
-    res?.hasNext,
-    res?.has_next,
-    res?.pagination?.hasNext,
-    res?.pagination?.has_next,
-    res?.meta?.hasNext,
-    res?.meta?.has_next,
-  ];
-
-  const total = totalCandidates.find((value) => Number.isFinite(Number(value)));
-  const totalPages = totalPagesCandidates.find((value) =>
-    Number.isFinite(Number(value)),
-  );
-  const hasNextExplicit = hasNextCandidates.find(
-    (value) =>
-      typeof value === "boolean" ||
-      String(value).toLowerCase() === "true" ||
-      String(value).toLowerCase() === "false",
-  );
-
   return {
-    sessions: Array.isArray(list) ? list.slice(0, PAGE_LIMIT) : [],
-    total: total === undefined ? null : Number(total),
-    totalPages: totalPages === undefined ? null : Number(totalPages),
-    hasNextExplicit:
-      hasNextExplicit === undefined
-        ? null
-        : String(hasNextExplicit).toLowerCase() === "true",
+    sessions: Array.isArray(list) ? list : [],
   };
 }
 
@@ -191,9 +142,6 @@ export default function SessionList() {
     return document.visibilityState !== "hidden";
   });
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
-  const [page, setPage] = useState(1);
-  const [hasNext, setHasNext] = useState(false);
-  const [totalPages, setTotalPages] = useState(null);
   const [initializedFromUrl, setInitializedFromUrl] = useState(false);
 
   const pageCacheRef = useRef(new Map());
@@ -252,21 +200,16 @@ export default function SessionList() {
     if (!router.isReady || initializedFromUrl) return;
 
     const urlFilters = parseUrlFilters(router.query);
-    const urlPage = parsePageNumber(router.query.page);
 
     setFilters((prev) => ({ ...prev, ...urlFilters }));
-    setPage(urlPage);
     setInitializedFromUrl(true);
   }, [initializedFromUrl, router.isReady, router.query]);
 
   useEffect(() => {
     if (!initializedFromUrl || !router.isReady) return;
 
-    const nextQuery = buildSessionsQuery(effectiveFilters, page);
-    const currentQuery = buildSessionsQuery(
-      parseUrlFilters(router.query),
-      parsePageNumber(router.query.page),
-    );
+    const nextQuery = buildSessionsQuery(effectiveFilters);
+    const currentQuery = buildSessionsQuery(parseUrlFilters(router.query));
 
     if (serializeQuery(nextQuery) === serializeQuery(currentQuery)) {
       return;
@@ -280,7 +223,7 @@ export default function SessionList() {
       undefined,
       { shallow: true },
     );
-  }, [effectiveFilters, initializedFromUrl, page, router]);
+  }, [effectiveFilters, initializedFromUrl, router]);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -298,14 +241,12 @@ export default function SessionList() {
     ({ force = false } = {}) => {
       if (!initializedFromUrl) return () => {};
 
-      const query = buildSessionsQuery(effectiveFilters, page);
+      const query = buildSessionsQuery(effectiveFilters);
       const cacheKey = serializeQuery(query);
 
       if (!force && pageCacheRef.current.has(cacheKey)) {
         const cached = pageCacheRef.current.get(cacheKey);
         setSessions(cached.sessions);
-        setHasNext(cached.hasNext);
-        setTotalPages(cached.totalPages ?? null);
         setError("");
         setLoading(false);
         return () => {};
@@ -327,30 +268,11 @@ export default function SessionList() {
           if (requestId !== requestIdRef.current) return;
 
           const normalized = normalizeSessionListResponse(res);
-          const nextHasMore =
-            normalized.hasNextExplicit !== null
-              ? normalized.hasNextExplicit
-              : normalized.totalPages !== null
-                ? page < normalized.totalPages
-                : normalized.total !== null
-                  ? page * PAGE_LIMIT < normalized.total
-                  : normalized.sessions.length === PAGE_LIMIT;
-
-          const resolvedTotalPages =
-            normalized.totalPages !== null
-              ? normalized.totalPages
-              : normalized.total !== null
-                ? Math.max(1, Math.ceil(normalized.total / PAGE_LIMIT))
-                : null;
 
           setSessions(normalized.sessions);
-          setHasNext(nextHasMore);
-          setTotalPages(resolvedTotalPages);
 
           pageCacheRef.current.set(cacheKey, {
             sessions: normalized.sessions,
-            hasNext: nextHasMore,
-            totalPages: resolvedTotalPages,
           });
 
           if (normalized.sessions.length) {
@@ -394,15 +316,15 @@ export default function SessionList() {
 
       return () => controller.abort();
     },
-    [effectiveFilters, initializedFromUrl, page],
+    [effectiveFilters, initializedFromUrl],
   );
 
   const refreshCurrentPage = useCallback(() => {
-    const query = buildSessionsQuery(effectiveFilters, page);
+    const query = buildSessionsQuery(effectiveFilters);
     const cacheKey = serializeQuery(query);
     pageCacheRef.current.delete(cacheKey);
     load({ force: true });
-  }, [effectiveFilters, load, page]);
+  }, [effectiveFilters, load]);
 
   useEffect(() => {
     const cleanup = load();
@@ -434,17 +356,14 @@ export default function SessionList() {
 
   const setTextFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
-    setPage(1);
   };
 
   const setDirectFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
-    setPage(1);
   };
 
   const resetFilters = () => {
     setFilters(DEFAULT_FILTERS);
-    setPage(1);
   };
 
   const handleDelete = async (id) => {
@@ -540,18 +459,96 @@ export default function SessionList() {
     }
   };
 
-  const canGoPrev = page > 1 && !loading;
-  const canGoNext = hasNext && !loading;
-  const pageLabel =
-    Number.isFinite(totalPages) && totalPages > 0
-      ? `Page ${page} of ${totalPages}`
-      : `Page ${page}`;
-
   const displaySessions = useMemo(() => {
-    if (boothSortOrder === "none") return sessions;
+    const filtered = sessions.filter((session) => {
+      const boothFilter = String(effectiveFilters.boothNo || "")
+        .trim()
+        .toLowerCase();
+      if (boothFilter) {
+        const boothNumberRaw = String(
+          session?.booth_no ?? session?.boothNo ?? session?.booth_number ?? "",
+        ).toLowerCase();
+        const boothNameRaw = String(
+          session?.booth_name ?? session?.boothName ?? "",
+        ).toLowerCase();
+        const boothNumberParsed = extractBoothNumber(session);
+        const boothNumericText = Number.isNaN(boothNumberParsed)
+          ? ""
+          : String(boothNumberParsed);
+
+        if (
+          !boothNumberRaw.includes(boothFilter) &&
+          !boothNameRaw.includes(boothFilter) &&
+          !boothNumericText.includes(boothFilter)
+        ) {
+          return false;
+        }
+      }
+
+      const assemblyFilter = normalizeAssembly(effectiveFilters.assembly);
+      if (assemblyFilter) {
+        const assemblyText = normalizeAssembly(
+          session?.assembly_name ?? session?.constituency ?? session?.assembly,
+        );
+        if (!assemblyText.includes(assemblyFilter)) return false;
+      }
+
+      const listFilter = String(effectiveFilters.voterList || "")
+        .trim()
+        .toLowerCase();
+      if (listFilter) {
+        const listText = String(
+          session?.original_filename ??
+            session?.name ??
+            session?.title ??
+            session?.filename ??
+            "",
+        ).toLowerCase();
+        if (!listText.includes(listFilter)) return false;
+      }
+
+      const sectionFilter = String(effectiveFilters.section || "")
+        .trim()
+        .toLowerCase();
+      if (sectionFilter) {
+        const sectionText = String(
+          session?.section ?? session?.section_name ?? "",
+        ).toLowerCase();
+        if (!sectionText.includes(sectionFilter)) return false;
+      }
+
+      const statusFilter = String(effectiveFilters.status || "")
+        .trim()
+        .toLowerCase();
+      if (statusFilter) {
+        const statusText = String(session?.status || "").toLowerCase();
+        if (!statusText.includes(statusFilter)) return false;
+      }
+
+      const createdAtValue = session?.created_at ?? session?.createdAt;
+      if (effectiveFilters.fromDate && createdAtValue) {
+        const fromDate = new Date(`${effectiveFilters.fromDate}T00:00:00`);
+        const createdAt = new Date(createdAtValue);
+        if (!Number.isNaN(fromDate.getTime()) && createdAt < fromDate) {
+          return false;
+        }
+      }
+
+      if (effectiveFilters.toDate && createdAtValue) {
+        const toDate = new Date(`${effectiveFilters.toDate}T23:59:59.999`);
+        const createdAt = new Date(createdAtValue);
+        if (!Number.isNaN(toDate.getTime()) && createdAt > toDate) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    if (boothSortOrder === "none") return filtered;
 
     const direction = boothSortOrder === "asc" ? 1 : -1;
-    const sorted = [...sessions];
+    const sorted = [...filtered];
 
     sorted.sort((a, b) => {
       const aBooth = extractBoothNumber(a);
@@ -570,7 +567,7 @@ export default function SessionList() {
     });
 
     return sorted;
-  }, [boothSortOrder, sessions]);
+  }, [boothSortOrder, effectiveFilters, sessions]);
 
   return (
     <div className="space-y-3">
@@ -733,9 +730,7 @@ export default function SessionList() {
           <button className="btn btn-secondary" onClick={resetFilters}>
             Reset Filters
           </button>
-          <div className="text-xs text-slate-400">
-            Server query: page={page}, limit={PAGE_LIMIT}, sort={SORT_VALUE}
-          </div>
+          <div className="text-xs text-slate-400">Sort: {SORT_VALUE}</div>
         </div>
       </div>
 
@@ -747,7 +742,7 @@ export default function SessionList() {
 
       {loading && sessions.length === 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {Array.from({ length: PAGE_LIMIT }).map((_, idx) => (
+          {Array.from({ length: SKELETON_COUNT }).map((_, idx) => (
             <div
               key={`session-skeleton-${idx}`}
               className="card space-y-3 animate-pulse"
@@ -765,8 +760,12 @@ export default function SessionList() {
         </div>
       )}
 
-      {!loading && sessions.length === 0 && !error && (
-        <div className="p-3 text-slate-400">No voter lists found.</div>
+      {!loading && !error && displaySessions.length === 0 && (
+        <div className="p-3 text-slate-400">
+          {sessions.length === 0
+            ? "No voter lists found."
+            : "No voter lists match these filters."}
+        </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -928,24 +927,6 @@ export default function SessionList() {
             </div>
           );
         })}
-      </div>
-
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <button
-          className="btn btn-secondary"
-          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-          disabled={!canGoPrev}
-        >
-          Previous
-        </button>
-        <div className="text-sm text-slate-300">{pageLabel}</div>
-        <button
-          className="btn btn-secondary"
-          onClick={() => setPage((prev) => prev + 1)}
-          disabled={!canGoNext}
-        >
-          Next
-        </button>
       </div>
 
       {renameModal && (

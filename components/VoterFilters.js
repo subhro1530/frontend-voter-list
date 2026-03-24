@@ -27,15 +27,11 @@ export default function VoterFilters({
   religionStats,
   activeFilters,
 }) {
-  const [values, setValues] = useState({});
+  const [values, setValues] = useState(activeFilters || {});
 
-  // Debounce and sync URL
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      onChange(values);
-    }, 350);
-    return () => clearTimeout(timeout);
-  }, [values, onChange]);
+    setValues(activeFilters || {});
+  }, [activeFilters]);
 
   const handleChange = (key, val) => {
     setValues((prev) => ({ ...prev, [key]: val }));
@@ -81,7 +77,7 @@ export default function VoterFilters({
         placeholder: "House no.",
       },
       {
-        key: "relationType",
+        key: "relationName",
         label: "🧭 Relation",
         type: "text",
         placeholder: "Father/Mother",
@@ -99,8 +95,16 @@ export default function VoterFilters({
     (v) => v !== "" && v !== undefined && v !== null,
   ).length;
 
+  const handleSearch = (e) => {
+    e.preventDefault();
+    onChange(values);
+  };
+
   return (
-    <div className="card space-y-4 bg-ink-900/70 border border-ink-400/40">
+    <form
+      className="card space-y-4 bg-ink-900/70 border border-ink-400/40"
+      onSubmit={handleSearch}
+    >
       {/* Header with filter count badge */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -260,6 +264,23 @@ export default function VoterFilters({
           </div>
         ))}
       </div>
-    </div>
+
+      <div className="flex items-center gap-3 pt-1">
+        <button type="submit" className="btn btn-primary" disabled={disabled}>
+          {disabled ? "Searching..." : "Search"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={disabled}
+          onClick={() => {
+            setValues({});
+            onChange({});
+          }}
+        >
+          Reset
+        </button>
+      </div>
+    </form>
   );
 }

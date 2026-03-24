@@ -26,7 +26,15 @@ async function translateText(text, targetLang = "en") {
   }
 }
 
-export default function VoterTable({ voters = [], loading, error }) {
+export default function VoterTable({
+  voters = [],
+  loading,
+  error,
+  pagination,
+  onPageChange,
+  onLimitChange,
+  onRetry,
+}) {
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
   const [isTranslated, setIsTranslated] = useState(false);
@@ -41,11 +49,44 @@ export default function VoterTable({ voters = [], loading, error }) {
   }, [voters]);
 
   const displayVoters = isTranslated ? translatedVoters : voters;
+  const isServerPaginated =
+    Boolean(pagination) &&
+    (typeof onPageChange === "function" || typeof onLimitChange === "function");
+  const serverPage = Math.max(1, Number(pagination?.page || 1));
+  const serverLimit = Math.max(1, Number(pagination?.limit || 25));
+  const serverTotal = Math.max(0, Number(pagination?.total || 0));
+  const serverTotalPages = Math.max(0, Number(pagination?.totalPages || 0));
   const pages = Math.max(1, Math.ceil(displayVoters.length / pageSize));
+
+  useEffect(() => {
+    setPage((prev) => Math.min(prev, pages));
+  }, [pages]);
+
   const paged = useMemo(() => {
     const start = (page - 1) * pageSize;
     return displayVoters.slice(start, start + pageSize);
   }, [displayVoters, page, pageSize]);
+  const rows = isServerPaginated ? displayVoters : paged;
+
+  const visibleStart = isServerPaginated
+    ? serverTotal === 0
+      ? 0
+      : (serverPage - 1) * serverLimit + 1
+    : displayVoters.length === 0
+      ? 0
+      : (page - 1) * pageSize + 1;
+  const visibleEnd = isServerPaginated
+    ? Math.min(serverPage * serverLimit, serverTotal)
+    : Math.min(page * pageSize, displayVoters.length);
+  const displayTotal = isServerPaginated ? serverTotal : displayVoters.length;
+
+  const getVoterKey = useCallback((voter, index) => {
+    return String(
+      voter?.id ||
+        voter?.voter_id ||
+        `${voter?.serial_number || "row"}-${index}`,
+    );
+  }, []);
 
   const handleTranslate = useCallback(async () => {
     if (translating) return;
@@ -96,7 +137,7 @@ export default function VoterTable({ voters = [], loading, error }) {
     <div className="card space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="text-sm text-slate-200">
-          Showing {paged.length} of {displayVoters.length} voters
+          Showing {visibleStart}-{visibleEnd} of {displayTotal} voters
           {isTranslated && (
             <span className="ml-2 text-emerald-400 font-medium">
               (Translated)
@@ -106,6 +147,7 @@ export default function VoterTable({ voters = [], loading, error }) {
         <div className="flex flex-wrap items-center gap-2 text-sm w-full sm:w-auto">
           {/* Translate Button */}
           <button
+            type="button"
             onClick={handleTranslate}
             disabled={translating || loading || !voters.length}
             className={`translate-btn flex-1 sm:flex-none ${
@@ -146,8 +188,16 @@ export default function VoterTable({ voters = [], loading, error }) {
             <select
               id="pageSize"
               className="w-20 sm:w-24 text-sm"
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
+              value={isServerPaginated ? serverLimit : pageSize}
+              onChange={(e) => {
+                const nextLimit = Number(e.target.value);
+                if (isServerPaginated) {
+                  onLimitChange?.(nextLimit);
+                } else {
+                  setPageSize(nextLimit);
+                  setPage(1);
+                }
+              }}
             >
               {[10, 25, 50, 100, 200].map((size) => (
                 <option key={size} value={size}>
@@ -180,7 +230,18 @@ export default function VoterTable({ voters = [], loading, error }) {
 
       {error && (
         <div className="p-3 bg-rose-900/40 text-rose-100 rounded-lg border border-rose-700">
-          {error}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span>{error}</span>
+            {typeof onRetry === "function" && (
+              <button
+                type="button"
+                className="btn btn-secondary text-xs py-1 px-3"
+                onClick={onRetry}
+              >
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       )}
       {loading && <div className="p-3 text-slate-300">Loading voters…</div>}
@@ -194,9 +255,9 @@ export default function VoterTable({ voters = [], loading, error }) {
         <>
           {/* Mobile Card View */}
           <div className="voter-cards-mobile">
-            {paged.map((voter) => (
+            {rows.map((voter, index) => (
               <Link
-                key={`mobile-${voter.voter_id}-${voter.serial_number}`}
+                key={`mobile-${getVoterKey(voter, index)}`}
                 href={`/voter/${voter.id || voter.voter_id}`}
                 className="voter-card-mobile"
               >
@@ -277,9 +338,9 @@ export default function VoterTable({ voters = [], loading, error }) {
                 </tr>
               </thead>
               <tbody>
-                {paged.map((voter) => (
+                {rows.map((voter, index) => (
                   <tr
-                    key={`${voter.voter_id}-${voter.serial_number}`}
+                    key={getVoterKey(voter, index)}
                     className="border-b border-ink-400/40 hover:bg-ink-100/50 cursor-pointer transition-colors"
                   >
                     <td className="p-2">
@@ -336,29 +397,52 @@ export default function VoterTable({ voters = [], loading, error }) {
         </>
       )}
 
-      {!loading && !error && voters.length > pageSize && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-ink-400/30">
-          <div className="text-sm text-slate-300 order-2 sm:order-1">
-            Page {page} of {pages}
+      {!loading &&
+        !error &&
+        (isServerPaginated
+          ? serverTotalPages > 1
+          : voters.length > pageSize) && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-ink-400/30">
+            <div className="text-sm text-slate-300 order-2 sm:order-1">
+              Page {isServerPaginated ? serverPage : page} of{" "}
+              {isServerPaginated ? serverTotalPages || 1 : pages}
+            </div>
+            <div className="flex gap-2 w-full sm:w-auto order-1 sm:order-2">
+              <button
+                type="button"
+                className="btn btn-secondary flex-1 sm:flex-none"
+                disabled={isServerPaginated ? serverPage <= 1 : page === 1}
+                onClick={() => {
+                  if (isServerPaginated) {
+                    onPageChange?.(Math.max(1, serverPage - 1));
+                  } else {
+                    setPage((p) => Math.max(1, p - 1));
+                  }
+                }}
+              >
+                ← Previous
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary flex-1 sm:flex-none"
+                disabled={
+                  isServerPaginated
+                    ? serverTotalPages === 0 || serverPage >= serverTotalPages
+                    : page === pages
+                }
+                onClick={() => {
+                  if (isServerPaginated) {
+                    onPageChange?.(serverPage + 1);
+                  } else {
+                    setPage((p) => Math.min(pages, p + 1));
+                  }
+                }}
+              >
+                Next →
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2 w-full sm:w-auto order-1 sm:order-2">
-            <button
-              className="btn btn-secondary flex-1 sm:flex-none"
-              disabled={page === 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              ← Previous
-            </button>
-            <button
-              className="btn btn-primary flex-1 sm:flex-none"
-              disabled={page === pages}
-              onClick={() => setPage((p) => Math.min(pages, p + 1))}
-            >
-              Next →
-            </button>
-          </div>
-        </div>
-      )}
+        )}
     </div>
   );
 }

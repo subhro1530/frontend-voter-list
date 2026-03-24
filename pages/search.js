@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import ProtectedRoute from "../components/ProtectedRoute";
@@ -9,6 +9,52 @@ import VoterSlipCalibrationPanel from "../components/VoterSlipCalibrationPanel";
 import { useAuth } from "../context/AuthContext";
 import { userAPI, getSessions } from "../lib/api";
 import useMassVoterSlipJob from "../lib/useMassVoterSlipJob";
+
+const SEARCH_FILTER_KEYS = [
+  "voterId",
+  "relationName",
+  "partNumber",
+  "houseNumber",
+  "serialNumber",
+  "minAge",
+  "maxAge",
+  "name",
+  "section",
+  "assembly",
+  "gender",
+  "religion",
+];
+
+const DEFAULT_SEARCH_FILTERS = {
+  assembly: "",
+  partNumber: "",
+  name: "",
+  voterId: "",
+  section: "",
+  relationName: "",
+  houseNumber: "",
+  serialNumber: "",
+  minAge: "",
+  maxAge: "",
+  gender: "",
+  religion: "",
+};
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function sanitizeSearchFilters(raw = {}) {
+  const output = {};
+  SEARCH_FILTER_KEYS.forEach((key) => {
+    const value = raw?.[key];
+    if (value === "" || value === undefined || value === null) return;
+    output[key] = value;
+  });
+  return output;
+}
 
 function getPartOptionValue(part) {
   if (part === null || part === undefined) return "";
@@ -75,14 +121,7 @@ function SearchContent() {
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingParts, setLoadingParts] = useState(false);
 
-  const [filters, setFilters] = useState({
-    assembly: "",
-    partNumber: "",
-    name: "",
-    voterId: "",
-    section: "",
-    relationName: "",
-  });
+  const [filters, setFilters] = useState(DEFAULT_SEARCH_FILTERS);
 
   const [voters, setVoters] = useState([]);
   const [pagination, setPagination] = useState({
@@ -98,6 +137,14 @@ function SearchContent() {
   const [loadingMassParts, setLoadingMassParts] = useState(false);
   const [singleDownloadLoadingByVoterId, setSingleDownloadLoadingByVoterId] =
     useState({});
+  const searchControllerRef = useRef(null);
+  const searchRequestSeqRef = useRef(0);
+  const initializedFromQueryRef = useRef(false);
+  const lastSearchQueryRef = useRef({
+    filters: {},
+    page: 1,
+    limit: 50,
+  });
 
   const {
     massSlip,
@@ -200,55 +247,185 @@ function SearchContent() {
   }, [massSlip.filters.assembly]);
 
   const handleFilterChange = (key, value) => {
-    setFilters((prev) => ({ ...prev, [key]: value }));
-    if (key === "assembly") {
-      setFilters((prev) => ({ ...prev, partNumber: "" }));
-    }
+    setFilters((prev) => ({
+      ...prev,
+      [key]: value,
+      ...(key === "assembly" ? { partNumber: "" } : {}),
+    }));
   };
 
-  const searchVoters = useCallback(
-    async (page = 1) => {
-      setLoading(true);
-      setError("");
+  const syncSearchQueryState = useCallback(
+    (nextFilters, page, limit) => {
+      if (!router?.replace) return;
+      const filterQuery = sanitizeSearchFilters(nextFilters);
+      router.replace(
+        {
+          pathname: router.pathname,
+          query: {
+            ...filterQuery,
+            page: String(page),
+            limit: String(limit),
+          },
+        },
+        undefined,
+        { shallow: true },
+      );
+    },
+    [router],
+  );
 
+  const searchVoters = useCallback(
+    async ({
+      page = pagination.page,
+      limit = pagination.limit,
+      filtersOverride = filters,
+      syncQuery = true,
+    } = {}) => {
+      if (searchControllerRef.current) {
+        searchControllerRef.current.abort();
+      }
+
+      const controller = new AbortController();
+      searchControllerRef.current = controller;
+      const requestId = ++searchRequestSeqRef.current;
+
+      const safeFilters = sanitizeSearchFilters(filtersOverride);
+      const safePage = parsePositiveInt(page, 1);
+      const safeLimit = parsePositiveInt(limit, 50);
       const query = {
-        ...filters,
-        page,
-        limit: pagination.limit,
+        ...safeFilters,
+        page: safePage,
+        limit: safeLimit,
       };
 
-      // Remove empty values
-      Object.keys(query).forEach((key) => {
-        if (!query[key] && query[key] !== 0) delete query[key];
-      });
+      lastSearchQueryRef.current = {
+        filters: safeFilters,
+        page: safePage,
+        limit: safeLimit,
+      };
+
+      setLoading(true);
+      setError("");
+      setFilters({ ...DEFAULT_SEARCH_FILTERS, ...safeFilters });
+      if (syncQuery) {
+        syncSearchQueryState(safeFilters, safePage, safeLimit);
+      }
 
       try {
-        const res = await userAPI.searchVoters(query);
+        const res = await userAPI.searchVoters(query, controller.signal);
+        if (
+          searchControllerRef.current !== controller ||
+          requestId !== searchRequestSeqRef.current
+        ) {
+          return;
+        }
+
         setVoters(res.voters || []);
-        setPagination(
-          res.pagination || {
-            page,
-            limit: 50,
-            total: res.voters?.length || 0,
-            totalPages: 1,
-          },
-        );
+        const nextPagination = res.pagination || {
+          page: safePage,
+          limit: safeLimit,
+          total: res.voters?.length || 0,
+          totalPages: 0,
+        };
+
+        const normalizedPagination = {
+          ...nextPagination,
+          page: parsePositiveInt(nextPagination.page, safePage),
+          limit: parsePositiveInt(nextPagination.limit, safeLimit),
+          totalPages: Math.max(0, Number(nextPagination.totalPages || 0)),
+          total: Math.max(0, Number(nextPagination.total || 0)),
+        };
+
+        if (
+          normalizedPagination.totalPages > 0 &&
+          normalizedPagination.page > normalizedPagination.totalPages
+        ) {
+          await searchVoters({
+            page: 1,
+            limit: normalizedPagination.limit,
+            filtersOverride: safeFilters,
+            syncQuery: true,
+          });
+          return;
+        }
+
+        setPagination(normalizedPagination);
       } catch (err) {
+        if (err?.name === "AbortError") return;
+        if (requestId !== searchRequestSeqRef.current) return;
         setError(err.message || "Failed to search voters");
       } finally {
-        setLoading(false);
+        if (
+          searchControllerRef.current === controller &&
+          requestId === searchRequestSeqRef.current
+        ) {
+          setLoading(false);
+        }
       }
     },
-    [filters, pagination.limit],
+    [
+      filters,
+      pagination.limit,
+      pagination.page,
+      searchRequestSeqRef,
+      syncSearchQueryState,
+    ],
   );
+
+  useEffect(() => {
+    return () => {
+      if (searchControllerRef.current) {
+        searchControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!router.isReady || initializedFromQueryRef.current) return;
+
+    const initialFilters = sanitizeSearchFilters(router.query || {});
+    const initialPage = parsePositiveInt(router.query.page, 1);
+    const initialLimit = parsePositiveInt(router.query.limit, pagination.limit);
+
+    initializedFromQueryRef.current = true;
+    setFilters({ ...DEFAULT_SEARCH_FILTERS, ...initialFilters });
+
+    searchVoters({
+      filtersOverride: { ...DEFAULT_SEARCH_FILTERS, ...initialFilters },
+      page: initialPage,
+      limit: initialLimit,
+      syncQuery: false,
+    });
+  }, [filters, pagination.limit, router.isReady, router.query, searchVoters]);
 
   const handleSearch = (e) => {
     e?.preventDefault();
-    searchVoters(1);
+    searchVoters({
+      filtersOverride: filters,
+      page: 1,
+      limit: pagination.limit,
+    });
   };
 
   const handlePageChange = (newPage) => {
-    searchVoters(newPage);
+    searchVoters({ page: newPage, limit: pagination.limit });
+  };
+
+  const handleLimitChange = (nextLimit) => {
+    searchVoters({
+      filtersOverride: filters,
+      page: pagination.page,
+      limit: nextLimit,
+    });
+  };
+
+  const retrySearch = () => {
+    const last = lastSearchQueryRef.current;
+    searchVoters({
+      filtersOverride: last.filters,
+      page: last.page,
+      limit: last.limit,
+    });
   };
 
   const handleVoterClick = (voterId) => {
@@ -343,6 +520,13 @@ function SearchContent() {
     massSlip.total > 0
       ? Math.min(100, Math.round((massSlip.processed / massSlip.total) * 100))
       : 0;
+
+  const visibleRangeStart =
+    pagination.total <= 0 ? 0 : (pagination.page - 1) * pagination.limit + 1;
+  const visibleRangeEnd =
+    pagination.total <= 0
+      ? 0
+      : Math.min(pagination.page * pagination.limit, pagination.total);
 
   return (
     <div className="space-y-6">
@@ -474,15 +658,14 @@ function SearchContent() {
               type="button"
               className="btn btn-secondary"
               onClick={() => {
-                setFilters({
-                  assembly: "",
-                  partNumber: "",
-                  name: "",
-                  voterId: "",
-                  section: "",
-                  relationName: "",
-                });
+                setFilters(DEFAULT_SEARCH_FILTERS);
                 setVoters([]);
+                setPagination((prev) => ({
+                  ...prev,
+                  page: 1,
+                  total: 0,
+                  totalPages: 0,
+                }));
               }}
             >
               Clear
@@ -775,7 +958,17 @@ function SearchContent() {
       {/* Error */}
       {error && (
         <div className="p-3 bg-rose-900/50 text-rose-100 rounded-lg border border-rose-700">
-          {error}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span>{error}</span>
+            <button
+              type="button"
+              className="btn btn-secondary text-xs py-1 px-3"
+              onClick={retrySearch}
+              disabled={loading}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
 
@@ -783,11 +976,32 @@ function SearchContent() {
       {voters.length > 0 && (
         <div className="card space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <h3 className="text-lg font-semibold text-slate-100">
-              Results ({pagination.total || voters.length} voters)
-            </h3>
-            <div className="text-sm text-slate-400">
-              Page {pagination.page} of {pagination.totalPages || 1}
+            <div>
+              <h3 className="text-lg font-semibold text-slate-100">
+                Results ({pagination.total} voters)
+              </h3>
+              <div className="text-sm text-slate-400">
+                Showing {visibleRangeStart}-{visibleRangeEnd} of{" "}
+                {pagination.total}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <label htmlFor="searchLimit" className="text-slate-300">
+                Per page
+              </label>
+              <select
+                id="searchLimit"
+                className="w-20"
+                value={pagination.limit}
+                onChange={(e) => handleLimitChange(Number(e.target.value))}
+                disabled={loading}
+              >
+                {[10, 25, 50, 100, 200].map((size) => (
+                  <option key={`search-limit-${size}`} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -957,19 +1171,24 @@ function SearchContent() {
           {pagination.totalPages > 1 && (
             <div className="flex items-center justify-between pt-2">
               <div className="text-sm text-slate-300">
-                Page {pagination.page} of {pagination.totalPages}
+                Page {pagination.page} of {pagination.totalPages || 1}
               </div>
               <div className="flex gap-2">
                 <button
+                  type="button"
                   className="btn btn-secondary"
-                  disabled={pagination.page === 1}
+                  disabled={pagination.page <= 1}
                   onClick={() => handlePageChange(pagination.page - 1)}
                 >
                   Previous
                 </button>
                 <button
+                  type="button"
                   className="btn btn-primary"
-                  disabled={pagination.page === pagination.totalPages}
+                  disabled={
+                    pagination.totalPages === 0 ||
+                    pagination.page >= pagination.totalPages
+                  }
                   onClick={() => handlePageChange(pagination.page + 1)}
                 >
                   Next
