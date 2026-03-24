@@ -327,6 +327,7 @@ function SearchContent() {
     processing: "bg-sky-900/50 text-sky-100 border-sky-700/60",
     completed: "bg-emerald-900/50 text-emerald-100 border-emerald-700/60",
     failed: "bg-rose-900/50 text-rose-100 border-rose-700/60",
+    cancelled: "bg-rose-900/50 text-rose-100 border-rose-700/60",
   };
 
   const statusLabel = {
@@ -335,6 +336,7 @@ function SearchContent() {
     processing: "Processing",
     completed: "Completed",
     failed: "Failed",
+    cancelled: "Cancelled",
   };
 
   const progressPercent =

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import {
@@ -19,6 +19,20 @@ import {
 import DispatchModeSelector from "./DispatchModeSelector";
 import { readStoredDispatchMode } from "../lib/dispatchMode";
 
+const PAGE_LIMIT = 10;
+const SORT_VALUE = "createdAt:desc";
+const DEBOUNCE_MS = 400;
+
+const DEFAULT_FILTERS = {
+  boothNo: "",
+  assembly: "",
+  voterList: "",
+  section: "",
+  status: "",
+  fromDate: "",
+  toDate: "",
+};
+
 const statusTone = (status) => {
   const key = (status || "").toLowerCase();
   if (key.includes("fail")) return "status-failed";
@@ -36,6 +50,122 @@ const statusIcon = (status) => {
   if (key.includes("complete")) return "✅";
   return "📋";
 };
+
+function toSingleQueryValue(value) {
+  if (Array.isArray(value)) return String(value[0] || "");
+  return String(value || "");
+}
+
+function parsePageNumber(value) {
+  const n = Number(toSingleQueryValue(value));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.floor(n);
+}
+
+function parseUrlFilters(query) {
+  return {
+    boothNo: toSingleQueryValue(query.boothNo),
+    assembly: toSingleQueryValue(query.assembly),
+    voterList: toSingleQueryValue(query.voterList),
+    section: toSingleQueryValue(query.section),
+    status: toSingleQueryValue(query.status),
+    fromDate: toSingleQueryValue(query.fromDate),
+    toDate: toSingleQueryValue(query.toDate),
+  };
+}
+
+function buildSessionsQuery(filters, page) {
+  const query = {
+    page: String(page || 1),
+    limit: String(PAGE_LIMIT),
+    sort: SORT_VALUE,
+  };
+
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    const text = String(value).trim();
+    if (!text) return;
+    query[key] = text;
+  });
+
+  return query;
+}
+
+function serializeQuery(query) {
+  const params = new URLSearchParams();
+  Object.keys(query)
+    .sort()
+    .forEach((key) => {
+      params.set(key, String(query[key]));
+    });
+  return params.toString();
+}
+
+function normalizeSessionListResponse(res) {
+  const list = Array.isArray(res?.sessions)
+    ? res.sessions
+    : Array.isArray(res?.data)
+      ? res.data
+      : Array.isArray(res)
+        ? res
+        : [];
+
+  const totalCandidates = [
+    res?.total,
+    res?.count,
+    res?.totalCount,
+    res?.pagination?.total,
+    res?.meta?.total,
+  ];
+
+  const totalPagesCandidates = [
+    res?.totalPages,
+    res?.pagination?.totalPages,
+    res?.meta?.totalPages,
+    res?.pages,
+  ];
+
+  const hasNextCandidates = [
+    res?.hasNext,
+    res?.has_next,
+    res?.pagination?.hasNext,
+    res?.pagination?.has_next,
+    res?.meta?.hasNext,
+    res?.meta?.has_next,
+  ];
+
+  const total = totalCandidates.find((value) => Number.isFinite(Number(value)));
+  const totalPages = totalPagesCandidates.find((value) =>
+    Number.isFinite(Number(value)),
+  );
+  const hasNextExplicit = hasNextCandidates.find(
+    (value) =>
+      typeof value === "boolean" ||
+      String(value).toLowerCase() === "true" ||
+      String(value).toLowerCase() === "false",
+  );
+
+  return {
+    sessions: Array.isArray(list) ? list.slice(0, PAGE_LIMIT) : [],
+    total: total === undefined ? null : Number(total),
+    totalPages: totalPages === undefined ? null : Number(totalPages),
+    hasNextExplicit:
+      hasNextExplicit === undefined
+        ? null
+        : String(hasNextExplicit).toLowerCase() === "true",
+  };
+}
+
+function useDebouncedValue(value, delayMs) {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [delayMs, value]);
+
+  return debounced;
+}
 
 export default function SessionList() {
   const router = useRouter();
@@ -60,6 +190,41 @@ export default function SessionList() {
     if (typeof document === "undefined") return true;
     return document.visibilityState !== "hidden";
   });
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [page, setPage] = useState(1);
+  const [hasNext, setHasNext] = useState(false);
+  const [totalPages, setTotalPages] = useState(null);
+  const [initializedFromUrl, setInitializedFromUrl] = useState(false);
+
+  const pageCacheRef = useRef(new Map());
+  const requestIdRef = useRef(0);
+  const activeControllerRef = useRef(null);
+
+  const debouncedBoothNo = useDebouncedValue(filters.boothNo, DEBOUNCE_MS);
+  const debouncedAssembly = useDebouncedValue(filters.assembly, DEBOUNCE_MS);
+  const debouncedVoterList = useDebouncedValue(filters.voterList, DEBOUNCE_MS);
+  const debouncedSection = useDebouncedValue(filters.section, DEBOUNCE_MS);
+
+  const effectiveFilters = useMemo(
+    () => ({
+      boothNo: debouncedBoothNo,
+      assembly: debouncedAssembly,
+      voterList: debouncedVoterList,
+      section: debouncedSection,
+      status: filters.status,
+      fromDate: filters.fromDate,
+      toDate: filters.toDate,
+    }),
+    [
+      debouncedAssembly,
+      debouncedBoothNo,
+      debouncedSection,
+      debouncedVoterList,
+      filters.fromDate,
+      filters.status,
+      filters.toDate,
+    ],
+  );
 
   useEffect(() => {
     setDispatchMode(readStoredDispatchMode());
@@ -70,9 +235,9 @@ export default function SessionList() {
     const savedOrder =
       window.localStorage.getItem("session-booth-sort-order") || "none";
     if (
+      savedOrder === "none" ||
       savedOrder === "asc" ||
-      savedOrder === "desc" ||
-      savedOrder === "none"
+      savedOrder === "desc"
     ) {
       setBoothSortOrder(savedOrder);
     }
@@ -82,6 +247,40 @@ export default function SessionList() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("session-booth-sort-order", boothSortOrder);
   }, [boothSortOrder]);
+
+  useEffect(() => {
+    if (!router.isReady || initializedFromUrl) return;
+
+    const urlFilters = parseUrlFilters(router.query);
+    const urlPage = parsePageNumber(router.query.page);
+
+    setFilters((prev) => ({ ...prev, ...urlFilters }));
+    setPage(urlPage);
+    setInitializedFromUrl(true);
+  }, [initializedFromUrl, router.isReady, router.query]);
+
+  useEffect(() => {
+    if (!initializedFromUrl || !router.isReady) return;
+
+    const nextQuery = buildSessionsQuery(effectiveFilters, page);
+    const currentQuery = buildSessionsQuery(
+      parseUrlFilters(router.query),
+      parsePageNumber(router.query.page),
+    );
+
+    if (serializeQuery(nextQuery) === serializeQuery(currentQuery)) {
+      return;
+    }
+
+    router.replace(
+      {
+        pathname: router.pathname,
+        query: nextQuery,
+      },
+      undefined,
+      { shallow: true },
+    );
+  }, [effectiveFilters, initializedFromUrl, page, router]);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -95,67 +294,129 @@ export default function SessionList() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
   }, []);
 
-  const load = () => {
-    const controller = new AbortController();
-    setLoading(true);
-    setError("");
-    getSessions(controller.signal)
-      .then((res) => {
-        const list = Array.isArray(res?.sessions)
-          ? res.sessions
-          : Array.isArray(res?.data)
-            ? res.data
-            : Array.isArray(res)
-              ? res
-              : null;
+  const load = useCallback(
+    ({ force = false } = {}) => {
+      if (!initializedFromUrl) return () => {};
 
-        if (!Array.isArray(list)) {
-          setSessions([]);
-          setError("Unexpected sessions response. Please check the API.");
-          return;
-        }
+      const query = buildSessionsQuery(effectiveFilters, page);
+      const cacheKey = serializeQuery(query);
 
-        setSessions(list);
-        if (list.length) {
-          Promise.all(
-            list.map((s) =>
-              getSessionStatus(s.id)
-                .then((payload) => ({ id: s.id, payload }))
-                .catch(() => null),
-            ),
-          ).then((results) => {
-            const next = {};
-            const nextDispatchTierMap = {};
+      if (!force && pageCacheRef.current.has(cacheKey)) {
+        const cached = pageCacheRef.current.get(cacheKey);
+        setSessions(cached.sessions);
+        setHasNext(cached.hasNext);
+        setTotalPages(cached.totalPages ?? null);
+        setError("");
+        setLoading(false);
+        return () => {};
+      }
 
-            results.filter(Boolean).forEach(({ id, payload }) => {
-              next[id] = normalizeProgress(payload);
-              const dispatchTier = extractDispatchTier(payload);
-              if (dispatchTier) {
-                nextDispatchTierMap[id] = dispatchTier;
-              }
-            });
+      if (activeControllerRef.current) {
+        activeControllerRef.current.abort();
+      }
 
-            setProgressMap((prev) => ({ ...prev, ...next }));
-            setDispatchTierMap((prev) => ({ ...prev, ...nextDispatchTierMap }));
+      const controller = new AbortController();
+      activeControllerRef.current = controller;
+      const requestId = ++requestIdRef.current;
+
+      setLoading(true);
+      setError("");
+
+      getSessions(query, controller.signal)
+        .then((res) => {
+          if (requestId !== requestIdRef.current) return;
+
+          const normalized = normalizeSessionListResponse(res);
+          const nextHasMore =
+            normalized.hasNextExplicit !== null
+              ? normalized.hasNextExplicit
+              : normalized.totalPages !== null
+                ? page < normalized.totalPages
+                : normalized.total !== null
+                  ? page * PAGE_LIMIT < normalized.total
+                  : normalized.sessions.length === PAGE_LIMIT;
+
+          const resolvedTotalPages =
+            normalized.totalPages !== null
+              ? normalized.totalPages
+              : normalized.total !== null
+                ? Math.max(1, Math.ceil(normalized.total / PAGE_LIMIT))
+                : null;
+
+          setSessions(normalized.sessions);
+          setHasNext(nextHasMore);
+          setTotalPages(resolvedTotalPages);
+
+          pageCacheRef.current.set(cacheKey, {
+            sessions: normalized.sessions,
+            hasNext: nextHasMore,
+            totalPages: resolvedTotalPages,
           });
-        }
-      })
-      .catch((err) => setError(err.message || "Failed to load sessions"))
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  };
 
-  useEffect(load, []);
+          if (normalized.sessions.length) {
+            Promise.all(
+              normalized.sessions.map((sessionItem) =>
+                getSessionStatus(sessionItem.id, controller.signal)
+                  .then((payload) => ({ id: sessionItem.id, payload }))
+                  .catch(() => null),
+              ),
+            ).then((results) => {
+              if (requestId !== requestIdRef.current) return;
+
+              const nextProgress = {};
+              const nextDispatchTierMap = {};
+
+              results.filter(Boolean).forEach(({ id, payload }) => {
+                nextProgress[id] = normalizeProgress(payload);
+                const dispatchTier = extractDispatchTier(payload);
+                if (dispatchTier) {
+                  nextDispatchTierMap[id] = dispatchTier;
+                }
+              });
+
+              setProgressMap((prev) => ({ ...prev, ...nextProgress }));
+              setDispatchTierMap((prev) => ({
+                ...prev,
+                ...nextDispatchTierMap,
+              }));
+            });
+          }
+        })
+        .catch((err) => {
+          if (err.name === "AbortError") return;
+          if (requestId !== requestIdRef.current) return;
+          setError(err.message || "Failed to load sessions");
+        })
+        .finally(() => {
+          if (requestId !== requestIdRef.current) return;
+          setLoading(false);
+        });
+
+      return () => controller.abort();
+    },
+    [effectiveFilters, initializedFromUrl, page],
+  );
+
+  const refreshCurrentPage = useCallback(() => {
+    const query = buildSessionsQuery(effectiveFilters, page);
+    const cacheKey = serializeQuery(query);
+    pageCacheRef.current.delete(cacheKey);
+    load({ force: true });
+  }, [effectiveFilters, load, page]);
+
+  useEffect(() => {
+    const cleanup = load();
+    return () => cleanup?.();
+  }, [load]);
 
   useEffect(() => {
     if (!router?.query?.fromUpload) return;
     const timer = setTimeout(() => {
-      load();
+      load({ force: true });
     }, 800);
     return () => clearTimeout(timer);
-  }, [router?.query?.fromUpload]);
+  }, [load, router?.query?.fromUpload]);
 
-  // Auto-refresh every 2 seconds for processing sessions while tab is visible.
   useEffect(() => {
     if (!isTabVisible) return;
 
@@ -165,21 +426,38 @@ export default function SessionList() {
     if (!hasProcessing) return;
 
     const interval = setInterval(() => {
-      load();
+      load({ force: true });
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [sessions, isTabVisible]);
+  }, [isTabVisible, load, sessions]);
+
+  const setTextFilter = (key, value) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    setPage(1);
+  };
+
+  const setDirectFilter = (key, value) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    setPage(1);
+  };
+
+  const resetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    setPage(1);
+  };
 
   const handleDelete = async (id) => {
     const session = sessions.find((s) => s.id === id);
     if (!window.confirm(`Delete session ${session?.original_filename || id}?`))
       return;
+
     setActionLoading(id);
     const prev = sessions;
     setSessions((list) => list.filter((s) => s.id !== id));
     try {
       await deleteSession(id);
+      pageCacheRef.current.clear();
     } catch (err) {
       setError(err.message || "Delete failed");
       setSessions(prev);
@@ -192,7 +470,7 @@ export default function SessionList() {
     setActionLoading(id);
     try {
       await stopSession(id);
-      load();
+      refreshCurrentPage();
     } catch (err) {
       setError(err.message || "Failed to stop session");
     } finally {
@@ -209,7 +487,7 @@ export default function SessionList() {
       toast.success(
         retryText ? `Session resumed. ${retryText}` : "Session resumed.",
       );
-      load();
+      refreshCurrentPage();
     } catch (err) {
       setError(err.message || "Failed to resume session");
     } finally {
@@ -221,7 +499,7 @@ export default function SessionList() {
     try {
       await renameSession(id, newName);
       setRenameModal(null);
-      load();
+      refreshCurrentPage();
     } catch (err) {
       setError(err.message || "Failed to rename session");
     }
@@ -262,33 +540,37 @@ export default function SessionList() {
     }
   };
 
-  const sortedSessions = useMemo(() => {
-    const list = Array.isArray(sessions) ? [...sessions] : [];
-    if (boothSortOrder === "none") {
-      return list;
-    }
+  const canGoPrev = page > 1 && !loading;
+  const canGoNext = hasNext && !loading;
+  const pageLabel =
+    Number.isFinite(totalPages) && totalPages > 0
+      ? `Page ${page} of ${totalPages}`
+      : `Page ${page}`;
+
+  const displaySessions = useMemo(() => {
+    if (boothSortOrder === "none") return sessions;
 
     const direction = boothSortOrder === "asc" ? 1 : -1;
-    list.sort((a, b) => {
+    const sorted = [...sessions];
+
+    sorted.sort((a, b) => {
       const aBooth = extractBoothNumber(a);
       const bBooth = extractBoothNumber(b);
-
       const aMissing = Number.isNaN(aBooth);
       const bMissing = Number.isNaN(bBooth);
+
       if (aMissing && bMissing) {
         return String(a?.id || "").localeCompare(String(b?.id || ""));
       }
       if (aMissing) return 1;
       if (bMissing) return -1;
-      if (aBooth !== bBooth) {
-        return (aBooth - bBooth) * direction;
-      }
+      if (aBooth !== bBooth) return (aBooth - bBooth) * direction;
 
       return String(a?.id || "").localeCompare(String(b?.id || ""));
     });
 
-    return list;
-  }, [sessions, boothSortOrder]);
+    return sorted;
+  }, [boothSortOrder, sessions]);
 
   return (
     <div className="space-y-3">
@@ -320,26 +602,175 @@ export default function SessionList() {
           />
           <button
             className="btn btn-secondary"
-            onClick={load}
+            onClick={refreshCurrentPage}
             disabled={loading}
           >
             Refresh
           </button>
         </div>
       </div>
+
+      <div className="card space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="space-y-1">
+            <label
+              htmlFor="session-filter-booth"
+              className="text-xs text-slate-300"
+            >
+              Booth No
+            </label>
+            <input
+              id="session-filter-booth"
+              type="text"
+              value={filters.boothNo}
+              onChange={(e) => setTextFilter("boothNo", e.target.value)}
+              placeholder="e.g. 123"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="session-filter-assembly"
+              className="text-xs text-slate-300"
+            >
+              Assembly
+            </label>
+            <input
+              id="session-filter-assembly"
+              type="text"
+              value={filters.assembly}
+              onChange={(e) => setTextFilter("assembly", e.target.value)}
+              placeholder="Assembly name"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="session-filter-voter-list"
+              className="text-xs text-slate-300"
+            >
+              Voter List
+            </label>
+            <input
+              id="session-filter-voter-list"
+              type="text"
+              value={filters.voterList}
+              onChange={(e) => setTextFilter("voterList", e.target.value)}
+              placeholder="Session name"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="session-filter-section"
+              className="text-xs text-slate-300"
+            >
+              Section
+            </label>
+            <input
+              id="session-filter-section"
+              type="text"
+              value={filters.section}
+              onChange={(e) => setTextFilter("section", e.target.value)}
+              placeholder="e.g. A"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="session-filter-from"
+              className="text-xs text-slate-300"
+            >
+              From Date
+            </label>
+            <input
+              id="session-filter-from"
+              type="date"
+              value={filters.fromDate}
+              onChange={(e) => setDirectFilter("fromDate", e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="session-filter-to"
+              className="text-xs text-slate-300"
+            >
+              To Date
+            </label>
+            <input
+              id="session-filter-to"
+              type="date"
+              value={filters.toDate}
+              onChange={(e) => setDirectFilter("toDate", e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label
+              htmlFor="session-filter-status"
+              className="text-xs text-slate-300"
+            >
+              Status
+            </label>
+            <select
+              id="session-filter-status"
+              value={filters.status}
+              onChange={(e) => setDirectFilter("status", e.target.value)}
+            >
+              <option value="">All</option>
+              <option value="pending">Pending</option>
+              <option value="processing">Processing</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+              <option value="paused">Paused</option>
+              <option value="stopped">Stopped</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <button className="btn btn-secondary" onClick={resetFilters}>
+            Reset Filters
+          </button>
+          <div className="text-xs text-slate-400">
+            Server query: page={page}, limit={PAGE_LIMIT}, sort={SORT_VALUE}
+          </div>
+        </div>
+      </div>
+
       {error && (
         <div className="p-3 bg-rose-900/40 text-rose-100 rounded-lg border border-rose-700">
           {error}
         </div>
       )}
-      {loading && (
-        <div className="p-3 text-slate-300">Loading voter lists…</div>
+
+      {loading && sessions.length === 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array.from({ length: PAGE_LIMIT }).map((_, idx) => (
+            <div
+              key={`session-skeleton-${idx}`}
+              className="card space-y-3 animate-pulse"
+            >
+              <div className="h-5 w-2/3 rounded bg-ink-100" />
+              <div className="h-4 w-1/3 rounded bg-ink-100" />
+              <div className="grid grid-cols-2 gap-2">
+                <div className="h-4 rounded bg-ink-100" />
+                <div className="h-4 rounded bg-ink-100" />
+                <div className="h-4 rounded bg-ink-100" />
+                <div className="h-4 rounded bg-ink-100" />
+              </div>
+            </div>
+          ))}
+        </div>
       )}
-      {!loading && sortedSessions.length === 0 && !error && (
-        <div className="p-3 text-slate-400">No voter lists yet.</div>
+
+      {!loading && sessions.length === 0 && !error && (
+        <div className="p-3 text-slate-400">No voter lists found.</div>
       )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {sortedSessions.map((s) => {
+        {displaySessions.map((s) => {
           const status = (s.status || "").toLowerCase();
           const isProcessing = status.includes("process");
           const isPaused =
@@ -385,12 +816,7 @@ export default function SessionList() {
                   {statusIcon(s.status)} {s.status || "pending"}
                 </span>
               </div>
-              {s.booth_name && (
-                <p className="text-sm text-slate-400">
-                  🏢 Booth:{" "}
-                  <span className="text-slate-200">{s.booth_name}</span>
-                </p>
-              )}
+
               <div className="grid grid-cols-2 gap-2 text-sm text-slate-300">
                 <div>
                   Pages:{" "}
@@ -421,9 +847,11 @@ export default function SessionList() {
                   </span>
                 </div>
               </div>
+
               <p className="text-sm text-slate-300">
                 Dispatch tier used: {dispatchTier === "paid" ? "PAID" : "FREE"}
               </p>
+
               {(progressMap[s.id] || isProcessing) && (
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-slate-300">
@@ -449,19 +877,9 @@ export default function SessionList() {
                       style={{ width: `${progressMap[s.id]?.percent ?? 0}%` }}
                     />
                   </div>
-                  {isProcessing && (
-                    <p className="text-xs text-slate-400">
-                      ⏰ ~
-                      {((progressMap[s.id]?.total ?? s.page_count ?? 0) -
-                        (progressMap[s.id]?.processed ??
-                          s.processed_pages ??
-                          0)) *
-                        30}
-                      s remaining (sequential processing)
-                    </p>
-                  )}
                 </div>
               )}
+
               <div className="flex flex-wrap gap-2">
                 <Link className="btn btn-primary" href={`/sessions/${s.id}`}>
                   View
@@ -479,25 +897,23 @@ export default function SessionList() {
                   View Booth Result
                 </button>
 
-                {/* Stop button - only for processing sessions */}
                 {canStop && (
                   <button
                     className="btn bg-amber-600 hover:bg-amber-500 text-white"
                     onClick={() => handleStop(s.id)}
                     disabled={actionLoading === s.id}
                   >
-                    {actionLoading === s.id ? "Stopping…" : "🛑 Stop"}
+                    {actionLoading === s.id ? "Stopping..." : "🛑 Stop"}
                   </button>
                 )}
 
-                {/* Resume button - for paused/failed sessions */}
                 {canResume && (
                   <button
                     className="btn bg-emerald-600 hover:bg-emerald-500 text-white"
                     onClick={() => handleResume(s.id)}
                     disabled={actionLoading === s.id}
                   >
-                    {actionLoading === s.id ? "Resuming…" : "▶️ Resume"}
+                    {actionLoading === s.id ? "Resuming..." : "▶️ Resume"}
                   </button>
                 )}
 
@@ -506,7 +922,7 @@ export default function SessionList() {
                   onClick={() => handleDelete(s.id)}
                   disabled={actionLoading === s.id}
                 >
-                  {actionLoading === s.id ? "Deleting…" : "🗑️ Delete"}
+                  {actionLoading === s.id ? "Deleting..." : "🗑️ Delete"}
                 </button>
               </div>
             </div>
@@ -514,7 +930,24 @@ export default function SessionList() {
         })}
       </div>
 
-      {/* Rename Modal */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <button
+          className="btn btn-secondary"
+          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+          disabled={!canGoPrev}
+        >
+          Previous
+        </button>
+        <div className="text-sm text-slate-300">{pageLabel}</div>
+        <button
+          className="btn btn-secondary"
+          onClick={() => setPage((prev) => prev + 1)}
+          disabled={!canGoNext}
+        >
+          Next
+        </button>
+      </div>
+
       {renameModal && (
         <RenameModal
           session={renameModal}

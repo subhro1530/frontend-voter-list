@@ -554,6 +554,7 @@ export default function SessionDetail() {
     processing: "bg-sky-900/50 text-sky-100 border-sky-700/60",
     completed: "bg-emerald-900/50 text-emerald-100 border-emerald-700/60",
     failed: "bg-rose-900/50 text-rose-100 border-rose-700/60",
+    cancelled: "bg-rose-900/50 text-rose-100 border-rose-700/60",
   };
 
   const statusLabel = {
@@ -562,6 +563,7 @@ export default function SessionDetail() {
     processing: "Processing",
     completed: "Completed",
     failed: "Failed",
+    cancelled: "Cancelled",
   };
 
   const progressPercent =
@@ -927,8 +929,18 @@ export default function SessionDetail() {
                   onClick={retrySessionMassSlip}
                   disabled={sessionMassSlip.isStarting || isJobActive}
                 >
-                  Retry
+                  Restart with Previous Filters
                 </button>
+                {sessionMassSlip.technicalError && (
+                  <details className="text-xs text-slate-300 bg-ink-900/60 rounded-lg border border-ink-500/40 p-3">
+                    <summary className="cursor-pointer text-slate-200">
+                      Technical details
+                    </summary>
+                    <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px]">
+                      {sessionMassSlip.technicalError}
+                    </pre>
+                  </details>
+                )}
               </div>
             )}
           </div>
