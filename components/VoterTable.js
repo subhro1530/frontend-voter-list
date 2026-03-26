@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import CsvExportButton from "./CsvExportButton";
 import { VoterImage } from "./VoterSlip";
+import toast from "react-hot-toast";
 
 // Fields that contain translatable text
 const TRANSLATABLE_FIELDS = ["name", "relation_type", "section", "assembly"];
@@ -26,6 +27,33 @@ async function translateText(text, targetLang = "en") {
   }
 }
 
+function normalizeBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return ["true", "1", "yes", "y"].includes(normalized);
+  }
+  return false;
+}
+
+function getAdjudicationValue(voter) {
+  return normalizeBoolean(
+    voter?.underAdjudication ??
+      voter?.under_adjudication ??
+      voter?.isUnderAdjudication ??
+      voter?.is_under_adjudication,
+  );
+}
+
+function buildAdjudicationSnapshot(voterList = [], getVoterKey) {
+  const snapshot = {};
+  voterList.forEach((voter, index) => {
+    snapshot[getVoterKey(voter, index)] = getAdjudicationValue(voter);
+  });
+  return snapshot;
+}
+
 export default function VoterTable({
   voters = [],
   loading,
@@ -34,6 +62,7 @@ export default function VoterTable({
   onPageChange,
   onLimitChange,
   onRetry,
+  onSaveAdjudicationChanges,
 }) {
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
@@ -41,11 +70,17 @@ export default function VoterTable({
   const [translatedVoters, setTranslatedVoters] = useState([]);
   const [translating, setTranslating] = useState(false);
   const [translationProgress, setTranslationProgress] = useState(0);
+  const [adjudicationSort, setAdjudicationSort] = useState("none");
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [savingAdjudication, setSavingAdjudication] = useState(false);
+  const [savedAdjudication, setSavedAdjudication] = useState({});
+  const [draftAdjudication, setDraftAdjudication] = useState({});
 
   useEffect(() => {
     setPage(1);
     setIsTranslated(false);
     setTranslatedVoters([]);
+    setAdjudicationSort("none");
   }, [voters]);
 
   const displayVoters = isTranslated ? translatedVoters : voters;
@@ -62,11 +97,28 @@ export default function VoterTable({
     setPage((prev) => Math.min(prev, pages));
   }, [pages]);
 
+  const sortedDisplayVoters = useMemo(() => {
+    if (adjudicationSort === "none") return displayVoters;
+
+    const direction = adjudicationSort === "desc" ? -1 : 1;
+    return [...displayVoters].sort((a, b) => {
+      const aVal = getAdjudicationValue(a) ? 1 : 0;
+      const bVal = getAdjudicationValue(b) ? 1 : 0;
+      if (aVal !== bVal) {
+        return direction * (aVal - bVal);
+      }
+
+      return String(a?.name || "").localeCompare(String(b?.name || ""), undefined, {
+        sensitivity: "base",
+      });
+    });
+  }, [adjudicationSort, displayVoters]);
+
   const paged = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return displayVoters.slice(start, start + pageSize);
-  }, [displayVoters, page, pageSize]);
-  const rows = isServerPaginated ? displayVoters : paged;
+    return sortedDisplayVoters.slice(start, start + pageSize);
+  }, [sortedDisplayVoters, page, pageSize]);
+  const rows = isServerPaginated ? sortedDisplayVoters : paged;
 
   const visibleStart = isServerPaginated
     ? serverTotal === 0
@@ -77,8 +129,8 @@ export default function VoterTable({
       : (page - 1) * pageSize + 1;
   const visibleEnd = isServerPaginated
     ? Math.min(serverPage * serverLimit, serverTotal)
-    : Math.min(page * pageSize, displayVoters.length);
-  const displayTotal = isServerPaginated ? serverTotal : displayVoters.length;
+    : Math.min(page * pageSize, sortedDisplayVoters.length);
+  const displayTotal = isServerPaginated ? serverTotal : sortedDisplayVoters.length;
 
   const getVoterKey = useCallback((voter, index) => {
     return String(
@@ -87,6 +139,103 @@ export default function VoterTable({
         `${voter?.serial_number || "row"}-${index}`,
     );
   }, []);
+
+  useEffect(() => {
+    const snapshot = buildAdjudicationSnapshot(voters, getVoterKey);
+    setSavedAdjudication(snapshot);
+    setDraftAdjudication(snapshot);
+    setIsEditMode(false);
+  }, [voters, getVoterKey]);
+
+  const hasUnsavedAdjudicationChanges = useMemo(() => {
+    const keys = new Set([
+      ...Object.keys(savedAdjudication),
+      ...Object.keys(draftAdjudication),
+    ]);
+    for (const key of keys) {
+      if (Boolean(savedAdjudication[key]) !== Boolean(draftAdjudication[key])) {
+        return true;
+      }
+    }
+    return false;
+  }, [draftAdjudication, savedAdjudication]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (!isEditMode || !hasUnsavedAdjudicationChanges) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedAdjudicationChanges, isEditMode]);
+
+  const handleToggleEdit = useCallback(() => {
+    setDraftAdjudication(savedAdjudication);
+    setIsEditMode(true);
+  }, [savedAdjudication]);
+
+  const handleCancelEdit = useCallback(() => {
+    setDraftAdjudication(savedAdjudication);
+    setIsEditMode(false);
+  }, [savedAdjudication]);
+
+  const handleAdjudicationToggle = useCallback((key, checked) => {
+    setDraftAdjudication((prev) => ({
+      ...prev,
+      [key]: Boolean(checked),
+    }));
+  }, []);
+
+  const handleSaveAdjudication = useCallback(async () => {
+    if (typeof onSaveAdjudicationChanges !== "function") {
+      toast.error("Adjudication update is not available.");
+      return;
+    }
+
+    const updates = [];
+    voters.forEach((voter, index) => {
+      const key = getVoterKey(voter, index);
+      const previousValue = Boolean(savedAdjudication[key]);
+      const nextValue = Boolean(draftAdjudication[key]);
+      if (previousValue === nextValue) return;
+
+      const voterId = String(voter?.id || voter?.voter_id || "").trim();
+      if (!voterId) return;
+      updates.push({ voterId, underAdjudication: nextValue });
+    });
+
+    if (!updates.length) {
+      setIsEditMode(false);
+      return;
+    }
+
+    setSavingAdjudication(true);
+    try {
+      await onSaveAdjudicationChanges(updates);
+      setSavedAdjudication(draftAdjudication);
+      setIsEditMode(false);
+      toast.success("Adjudication status updated.");
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if (status === 404 || status === 405) {
+        toast.error(
+          "Save failed: adjudication update API route is missing on backend.",
+        );
+      } else {
+        toast.error(err?.message || "Failed to update adjudication status.");
+      }
+    } finally {
+      setSavingAdjudication(false);
+    }
+  }, [
+    draftAdjudication,
+    getVoterKey,
+    onSaveAdjudicationChanges,
+    savedAdjudication,
+    voters,
+  ]);
 
   const handleTranslate = useCallback(async () => {
     if (translating) return;
@@ -210,6 +359,36 @@ export default function VoterTable({
             voters={displayVoters}
             disabled={loading || !displayVoters.length}
           />
+          {!isEditMode && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleToggleEdit}
+              disabled={loading || !voters.length}
+            >
+              Edit Adjudication
+            </button>
+          )}
+          {isEditMode && (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleCancelEdit}
+                disabled={savingAdjudication}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSaveAdjudication}
+                disabled={savingAdjudication || !hasUnsavedAdjudicationChanges}
+              >
+                {savingAdjudication ? "Saving..." : "Save"}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -255,67 +434,116 @@ export default function VoterTable({
         <>
           {/* Mobile Card View */}
           <div className="voter-cards-mobile">
-            {rows.map((voter, index) => (
-              <Link
-                key={`mobile-${getVoterKey(voter, index)}`}
-                href={`/voter/${voter.id || voter.voter_id}`}
-                className="voter-card-mobile"
-              >
-                <div className="voter-card-mobile-header">
-                  <VoterImage voter={voter} size="medium" />
-                  <div className="voter-card-mobile-info">
-                    <h4 className="voter-card-mobile-name">
-                      {voter.name || "—"}
-                    </h4>
-                    <p className="voter-card-mobile-id">
-                      {voter.voter_id || "—"}
-                    </p>
+            {rows.map((voter, index) => {
+              const rowKey = getVoterKey(voter, index);
+              const adjudicationValue = isEditMode
+                ? Boolean(draftAdjudication[rowKey])
+                : getAdjudicationValue(voter);
+
+              const cardContent = (
+                <>
+                  <div className="voter-card-mobile-header">
+                    <VoterImage voter={voter} size="medium" />
+                    <div className="voter-card-mobile-info">
+                      <h4 className="voter-card-mobile-name">
+                        {voter.name || "—"}
+                      </h4>
+                      <p className="voter-card-mobile-id">
+                        {voter.voter_id || "—"}
+                      </p>
+                    </div>
+                    <div className="voter-card-mobile-badge">
+                      <span className="text-xs capitalize">
+                        {voter.gender || "—"}
+                      </span>
+                      <span className="text-sm font-bold">
+                        {voter.age ?? "—"}
+                      </span>
+                    </div>
                   </div>
-                  <div className="voter-card-mobile-badge">
-                    <span className="text-xs capitalize">
-                      {voter.gender || "—"}
+                  <div className="voter-card-mobile-details">
+                    <div className="voter-card-mobile-detail">
+                      <span className="detail-icon">⚖️</span>
+                      <span className="detail-label">Under Adjudication:</span>
+                      {isEditMode ? (
+                        <input
+                          type="checkbox"
+                          checked={adjudicationValue}
+                          onChange={(e) =>
+                            handleAdjudicationToggle(rowKey, e.target.checked)
+                          }
+                          aria-label="Under adjudication"
+                        />
+                      ) : (
+                        <span
+                          className={`detail-value font-semibold ${
+                            adjudicationValue
+                              ? "text-amber-300"
+                              : "text-slate-300"
+                          }`}
+                        >
+                          {adjudicationValue ? "Yes" : "No"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="voter-card-mobile-detail">
+                      <span className="detail-icon">🏠</span>
+                      <span className="detail-label">House:</span>
+                      <span className="detail-value">
+                        {voter.house_number || "—"}
+                      </span>
+                    </div>
+                    <div className="voter-card-mobile-detail">
+                      <span className="detail-icon">👨‍👧</span>
+                      <span className="detail-label">Relation:</span>
+                      <span className="detail-value">
+                        {voter.relation_type || "—"}
+                      </span>
+                    </div>
+                    <div className="voter-card-mobile-detail">
+                      <span className="detail-icon">📍</span>
+                      <span className="detail-label">Section:</span>
+                      <span className="detail-value">
+                        {voter.section || "—"}
+                      </span>
+                    </div>
+                    <div className="voter-card-mobile-detail">
+                      <span className="detail-icon">🔢</span>
+                      <span className="detail-label">Serial:</span>
+                      <span className="detail-value">
+                        {voter.serial_number || "—"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="voter-card-mobile-footer">
+                    <span className="text-xs text-slate-400">
+                      Part {voter.part_number || "—"} • {voter.assembly || "—"}
                     </span>
-                    <span className="text-sm font-bold">
-                      {voter.age ?? "—"}
-                    </span>
+                    {!isEditMode && (
+                      <span className="btn-view-mobile">View Details →</span>
+                    )}
                   </div>
-                </div>
-                <div className="voter-card-mobile-details">
-                  <div className="voter-card-mobile-detail">
-                    <span className="detail-icon">🏠</span>
-                    <span className="detail-label">House:</span>
-                    <span className="detail-value">
-                      {voter.house_number || "—"}
-                    </span>
+                </>
+              );
+
+              if (isEditMode) {
+                return (
+                  <div key={`mobile-${rowKey}`} className="voter-card-mobile">
+                    {cardContent}
                   </div>
-                  <div className="voter-card-mobile-detail">
-                    <span className="detail-icon">👨‍👧</span>
-                    <span className="detail-label">Relation:</span>
-                    <span className="detail-value">
-                      {voter.relation_type || "—"}
-                    </span>
-                  </div>
-                  <div className="voter-card-mobile-detail">
-                    <span className="detail-icon">📍</span>
-                    <span className="detail-label">Section:</span>
-                    <span className="detail-value">{voter.section || "—"}</span>
-                  </div>
-                  <div className="voter-card-mobile-detail">
-                    <span className="detail-icon">🔢</span>
-                    <span className="detail-label">Serial:</span>
-                    <span className="detail-value">
-                      {voter.serial_number || "—"}
-                    </span>
-                  </div>
-                </div>
-                <div className="voter-card-mobile-footer">
-                  <span className="text-xs text-slate-400">
-                    Part {voter.part_number || "—"} • {voter.assembly || "—"}
-                  </span>
-                  <span className="btn-view-mobile">View Details →</span>
-                </div>
-              </Link>
-            ))}
+                );
+              }
+
+              return (
+                <Link
+                  key={`mobile-${rowKey}`}
+                  href={`/voter/${voter.id || voter.voter_id}`}
+                  className="voter-card-mobile"
+                >
+                  {cardContent}
+                </Link>
+              );
+            })}
           </div>
 
           {/* Desktop Table View */}
@@ -334,63 +562,115 @@ export default function VoterTable({
                   <th className="p-2">Section</th>
                   <th className="p-2">Assembly</th>
                   <th className="p-2">Serial</th>
+                  <th className="p-2">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1"
+                      onClick={() => {
+                        setAdjudicationSort((prev) => {
+                          if (prev === "none") return "desc";
+                          if (prev === "desc") return "asc";
+                          return "none";
+                        });
+                      }}
+                      title="Toggle adjudication sort"
+                    >
+                      <span>Under Adjudication</span>
+                      <span className="text-xs text-slate-400">
+                        {adjudicationSort === "desc"
+                          ? "▼"
+                          : adjudicationSort === "asc"
+                            ? "▲"
+                            : "↕"}
+                      </span>
+                    </button>
+                  </th>
                   <th className="p-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((voter, index) => (
-                  <tr
-                    key={getVoterKey(voter, index)}
-                    className="border-b border-ink-400/40 hover:bg-ink-100/50 cursor-pointer transition-colors"
-                  >
-                    <td className="p-2">
-                      <VoterImage voter={voter} size="small" />
-                    </td>
-                    <td className="p-2 font-semibold text-slate-100">
-                      {voter.name || "—"}
-                    </td>
-                    <td className="p-2 text-slate-200 font-mono text-xs">
-                      {voter.voter_id || "—"}
-                    </td>
-                    <td className="p-2 text-slate-200 capitalize">
-                      {voter.gender || "—"}
-                    </td>
-                    <td className="p-2 text-slate-200">{voter.age ?? "—"}</td>
-                    <td className="p-2 text-slate-200">
-                      {voter.house_number || "—"}
-                    </td>
-                    <td className="p-2 text-slate-200">
-                      {voter.relation_type || "—"}
-                    </td>
-                    <td className="p-2 text-slate-200">
-                      {voter.part_number || "—"}
-                    </td>
-                    <td
-                      className="p-2 text-slate-200 max-w-[150px] truncate"
-                      title={voter.section}
+                {rows.map((voter, index) => {
+                  const rowKey = getVoterKey(voter, index);
+                  const adjudicationValue = isEditMode
+                    ? Boolean(draftAdjudication[rowKey])
+                    : getAdjudicationValue(voter);
+
+                  return (
+                    <tr
+                      key={rowKey}
+                      className="border-b border-ink-400/40 hover:bg-ink-100/50 cursor-pointer transition-colors"
                     >
-                      {voter.section || "—"}
-                    </td>
-                    <td
-                      className="p-2 text-slate-200 max-w-[150px] truncate"
-                      title={voter.assembly}
-                    >
-                      {voter.assembly || "—"}
-                    </td>
-                    <td className="p-2 text-slate-200">
-                      {voter.serial_number || "—"}
-                    </td>
-                    <td className="p-2">
-                      <Link
-                        href={`/voter/${voter.id || voter.voter_id}`}
-                        className="btn btn-primary text-xs py-1 px-3"
-                        onClick={(e) => e.stopPropagation()}
+                      <td className="p-2">
+                        <VoterImage voter={voter} size="small" />
+                      </td>
+                      <td className="p-2 font-semibold text-slate-100">
+                        {voter.name || "—"}
+                      </td>
+                      <td className="p-2 text-slate-200 font-mono text-xs">
+                        {voter.voter_id || "—"}
+                      </td>
+                      <td className="p-2 text-slate-200 capitalize">
+                        {voter.gender || "—"}
+                      </td>
+                      <td className="p-2 text-slate-200">{voter.age ?? "—"}</td>
+                      <td className="p-2 text-slate-200">
+                        {voter.house_number || "—"}
+                      </td>
+                      <td className="p-2 text-slate-200">
+                        {voter.relation_type || "—"}
+                      </td>
+                      <td className="p-2 text-slate-200">
+                        {voter.part_number || "—"}
+                      </td>
+                      <td
+                        className="p-2 text-slate-200 max-w-[150px] truncate"
+                        title={voter.section}
                       >
-                        <span className="mr-1">👁️</span> View
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                        {voter.section || "—"}
+                      </td>
+                      <td
+                        className="p-2 text-slate-200 max-w-[150px] truncate"
+                        title={voter.assembly}
+                      >
+                        {voter.assembly || "—"}
+                      </td>
+                      <td className="p-2 text-slate-200">
+                        {voter.serial_number || "—"}
+                      </td>
+                      <td className="p-2">
+                        {isEditMode ? (
+                          <input
+                            type="checkbox"
+                            checked={adjudicationValue}
+                            onChange={(e) =>
+                              handleAdjudicationToggle(rowKey, e.target.checked)
+                            }
+                            aria-label="Under adjudication"
+                          />
+                        ) : adjudicationValue ? (
+                          <span className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-900/40 px-2 py-0.5 text-xs font-semibold text-amber-200">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full border border-slate-500/60 bg-slate-800/60 px-2 py-0.5 text-xs font-semibold text-slate-300">
+                            No
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {!isEditMode && (
+                          <Link
+                            href={`/voter/${voter.id || voter.voter_id}`}
+                            className="btn btn-primary text-xs py-1 px-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span className="mr-1">👁️</span> View
+                          </Link>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

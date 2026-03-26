@@ -9,6 +9,7 @@ import {
   getSession,
   getSessionStatus,
   getSessionVoters,
+  updateSessionVoterAdjudication,
   getReligionStats,
   stopSession,
   resumeSession,
@@ -142,6 +143,89 @@ function sortVotersBySerial(voterList = []) {
       },
     );
   });
+}
+
+function toBooleanOrNull(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y"].includes(normalized)) return true;
+    if (["false", "0", "no", "n", ""].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function normalizeAdjudicationSource(value) {
+  const source = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (source === "ocr" || source === "manual" || source === "default") {
+    return source;
+  }
+  return "";
+}
+
+function detectAdjudicationFromOcr(voter = {}) {
+  const ocrFlag = toBooleanOrNull(
+    voter?.ocr?.underAdjudication ??
+      voter?.ocr_under_adjudication ??
+      voter?.ocrAdjudication,
+  );
+  if (ocrFlag !== null) return ocrFlag;
+
+  const textCandidates = [
+    voter?.ocr_text,
+    voter?.ocrText,
+    voter?.raw_text,
+    voter?.rawText,
+    voter?.full_text,
+    voter?.fullText,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (!textCandidates.length) return null;
+  const merged = textCandidates.join(" ").toUpperCase();
+  return /\bADJUDICATION\b|\bUNDER\s+ADJUDICATION\b/.test(merged);
+}
+
+function normalizeVoterAdjudication(voter = {}) {
+  const explicit = toBooleanOrNull(
+    voter?.underAdjudication ??
+      voter?.under_adjudication ??
+      voter?.isUnderAdjudication ??
+      voter?.is_under_adjudication,
+  );
+  const source = normalizeAdjudicationSource(
+    voter?.adjudicationSource ?? voter?.adjudication_source,
+  );
+
+  if (explicit !== null) {
+    return {
+      ...voter,
+      underAdjudication: explicit,
+      adjudicationSource: source || "default",
+    };
+  }
+
+  const ocrDetected = detectAdjudicationFromOcr(voter);
+  if (ocrDetected !== null) {
+    return {
+      ...voter,
+      underAdjudication: ocrDetected,
+      adjudicationSource: "ocr",
+    };
+  }
+
+  return {
+    ...voter,
+    underAdjudication: false,
+    adjudicationSource: source || "default",
+  };
 }
 
 function firstNonEmpty(...values) {
@@ -552,7 +636,7 @@ export default function SessionDetail() {
         .then((res) => {
           if (requestId !== voterRequestSeqRef.current) return;
 
-          const resVoters = res?.voters || [];
+          const resVoters = (res?.voters || []).map(normalizeVoterAdjudication);
           const resPagination = res?.pagination || {};
           const normalizedPagination = {
             page: parsePositiveInt(resPagination.page, safePage),
@@ -630,6 +714,38 @@ export default function SessionDetail() {
       limit: lastQuery.limit,
     });
   }, [fetchVoters]);
+
+  const handleSaveAdjudicationChanges = useCallback(
+    async (updates = []) => {
+      const normalized = (Array.isArray(updates) ? updates : [])
+        .map((item) => ({
+          voterId: String(item?.voterId || "").trim(),
+          underAdjudication: Boolean(item?.underAdjudication),
+        }))
+        .filter((item) => item.voterId);
+
+      if (!normalized.length) return;
+
+      await updateSessionVoterAdjudication(id, normalized);
+
+      const updateMap = new Map(
+        normalized.map((item) => [item.voterId, item.underAdjudication]),
+      );
+
+      setVoters((prev) =>
+        prev.map((voter) => {
+          const rowKey = String(voter?.id || voter?.voter_id || "").trim();
+          if (!rowKey || !updateMap.has(rowKey)) return voter;
+          return {
+            ...voter,
+            underAdjudication: updateMap.get(rowKey),
+            adjudicationSource: "manual",
+          };
+        }),
+      );
+    },
+    [id],
+  );
 
   useEffect(() => {
     if (!router.isReady || initializedFromQueryRef.current) return;
@@ -1116,6 +1232,7 @@ export default function SessionDetail() {
         onPageChange={handleVoterPageChange}
         onLimitChange={handleVoterLimitChange}
         onRetry={retryVoterFetch}
+        onSaveAdjudicationChanges={handleSaveAdjudicationChanges}
       />
     </div>
   );

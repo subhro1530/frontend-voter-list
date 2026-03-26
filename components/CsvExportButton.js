@@ -25,6 +25,7 @@ export default function CsvExportButton({ voters = [], disabled }) {
       part_number: v?.part_number ?? v?.partNumber ?? "",
       section: v?.section ?? "",
       assembly: v?.assembly ?? "",
+      under_adjudication: v?.underAdjudication ? "Yes" : "No",
     }));
   }, [voters]);
 
@@ -40,6 +41,7 @@ export default function CsvExportButton({ voters = [], disabled }) {
       "part_number",
       "section",
       "assembly",
+      "under_adjudication",
     ];
 
     const worksheet = XLSX.utils.json_to_sheet(normalizedRows, {
