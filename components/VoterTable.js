@@ -108,9 +108,13 @@ export default function VoterTable({
         return direction * (aVal - bVal);
       }
 
-      return String(a?.name || "").localeCompare(String(b?.name || ""), undefined, {
-        sensitivity: "base",
-      });
+      return String(a?.name || "").localeCompare(
+        String(b?.name || ""),
+        undefined,
+        {
+          sensitivity: "base",
+        },
+      );
     });
   }, [adjudicationSort, displayVoters]);
 
@@ -130,7 +134,9 @@ export default function VoterTable({
   const visibleEnd = isServerPaginated
     ? Math.min(serverPage * serverLimit, serverTotal)
     : Math.min(page * pageSize, sortedDisplayVoters.length);
-  const displayTotal = isServerPaginated ? serverTotal : sortedDisplayVoters.length;
+  const displayTotal = isServerPaginated
+    ? serverTotal
+    : sortedDisplayVoters.length;
 
   const getVoterKey = useCallback((voter, index) => {
     return String(
