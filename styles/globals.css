@@ -260,6 +260,25 @@ label {
   @apply text-sm font-bold text-slate-100;
 }
 
+.docx-preview-host .docx-wrapper {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.docx-preview-host .docx-wrapper article.docx > section.docx,
+.docx-preview-host article.docx > section {
+  margin: 0 auto 1.25rem !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  box-shadow: 0 12px 40px rgba(2, 6, 23, 0.35);
+}
+
+.docx-preview-host .docx-wrapper table,
+.docx-preview-host .docx-wrapper td,
+.docx-preview-host .docx-wrapper th {
+  border-color: rgba(15, 23, 42, 0.28) !important;
+}
+
 .religion-filter-stats {
   @apply text-xs text-slate-300;
 }

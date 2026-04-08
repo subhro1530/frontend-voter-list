@@ -38,7 +38,7 @@ function NavLink({ href, children, tooltip, className = "" }) {
   return link;
 }
 
-export default function Layout({ children }) {
+export default function Layout({ children, fullWidth = false }) {
   const { user, isAuthenticated, isAdmin, logout, isLoading } = useAuth();
   const { t } = useLanguage();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -606,12 +606,24 @@ export default function Layout({ children }) {
           </div>
         )}
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8 pb-20 space-y-6">
+      <main
+        className={
+          fullWidth
+            ? "w-full px-4 py-8 pb-20 space-y-6"
+            : "mx-auto max-w-6xl px-4 py-8 pb-20 space-y-6"
+        }
+      >
         <PageOverviewBanner />
         {children}
       </main>
       <footer className="border-t border-ink-400/70 bg-ink-100/80 mb-12">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-sm text-slate-300">
+        <div
+          className={
+            fullWidth
+              ? "w-full px-4 py-6 text-sm text-slate-300"
+              : "mx-auto max-w-6xl px-4 py-6 text-sm text-slate-300"
+          }
+        >
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <span className="text-center sm:text-left">
               Powered by Gemini OCR → Neon → Next.js
