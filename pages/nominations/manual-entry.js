@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
@@ -30,6 +30,97 @@ const EMPTY_PROPOSER = () => ({
   date: "",
 });
 
+function clonePayloadBase(source) {
+  if (!source || typeof source !== "object") return {};
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(source);
+    } catch {
+      // Fallback below.
+    }
+  }
+  try {
+    return JSON.parse(JSON.stringify(source));
+  } catch {
+    return { ...source };
+  }
+}
+
+function toSessionId(value) {
+  if (Array.isArray(value)) return String(value[0] || "");
+  return String(value || "");
+}
+
+function getDocxPageElements(root) {
+  if (!root) return [];
+  const strict = Array.from(
+    root.querySelectorAll(".docx-wrapper article.docx > section.docx"),
+  );
+  if (strict.length) return strict;
+  const fallback = Array.from(root.querySelectorAll("article.docx > section"));
+  if (fallback.length) return fallback;
+  return Array.from(root.querySelectorAll("section.docx"));
+}
+
+function normalizeNominationSessionListResponse(res) {
+  const list = Array.isArray(res?.sessions)
+    ? res.sessions
+    : Array.isArray(res?.data)
+      ? res.data
+      : Array.isArray(res)
+        ? res
+        : [];
+  return Array.isArray(list) ? list : [];
+}
+
+function countSchemaLeafPaths(node) {
+  if (!node) return 0;
+  if (Array.isArray(node)) {
+    if (!node.length) return 1;
+    return node.reduce((sum, child) => sum + countSchemaLeafPaths(child), 0);
+  }
+  if (typeof node !== "object") return 1;
+
+  if (node.fields && Array.isArray(node.fields)) {
+    return node.fields.reduce((sum, field) => {
+      if (field?.fields || field?.properties || field?.items) {
+        return sum + countSchemaLeafPaths(field);
+      }
+      return sum + 1;
+    }, 0);
+  }
+
+  if (node.properties && typeof node.properties === "object") {
+    return Object.values(node.properties).reduce(
+      (sum, child) => sum + countSchemaLeafPaths(child),
+      0,
+    );
+  }
+
+  if (node.items) {
+    return countSchemaLeafPaths(node.items);
+  }
+
+  const scalarKeys = Object.keys(node).filter(
+    (key) =>
+      ![
+        "type",
+        "description",
+        "title",
+        "required",
+        "enum",
+        "default",
+        "nullable",
+      ].includes(key),
+  );
+
+  if (!scalarKeys.length) return 1;
+  return scalarKeys.reduce(
+    (sum, key) => sum + countSchemaLeafPaths(node[key]),
+    0,
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  PAGE COMPONENT
 // ═══════════════════════════════════════════════════════════════════
@@ -37,7 +128,7 @@ const EMPTY_PROPOSER = () => ({
 export default function NominationManualEntryPage() {
   const router = useRouter();
   const { sessionId: querySessionId } = router.query;
-  const { user } = useAuth();
+  useAuth();
 
   // ── form state ──
   const [sessionId, setSessionId] = useState(null);
@@ -161,6 +252,49 @@ export default function NominationManualEntryPage() {
 
   // ── Nav state ──
   const [activeSectionId, setActiveSectionId] = useState("header");
+  const [mobileViewTab, setMobileViewTab] = useState("form");
+
+  // ── Save and schema state ──
+  const [sessionFormData, setSessionFormData] = useState(null);
+  const [schemaFieldCount, setSchemaFieldCount] = useState(null);
+  const [schemaLoadError, setSchemaLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [lastSaveExportUrl, setLastSaveExportUrl] = useState("");
+
+  // ── Preview-equivalent state ──
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewRenderError, setPreviewRenderError] = useState("");
+  const [previewBlobUrl, setPreviewBlobUrl] = useState("");
+  const [previewPageCount, setPreviewPageCount] = useState(0);
+  const [previewCurrentPage, setPreviewCurrentPage] = useState(1);
+  const [previewStale, setPreviewStale] = useState(true);
+  const [previewLastRefreshedAt, setPreviewLastRefreshedAt] = useState(null);
+  const [previewLastRenderedSessionId, setPreviewLastRenderedSessionId] =
+    useState("");
+  const previewHostRef = useRef(null);
+  const previewScrollRef = useRef(null);
+  const previewAbortRef = useRef(null);
+  const previewBlobUrlRef = useRef("");
+  const previewRequestIdRef = useRef(0);
+  const previewRefreshTimerRef = useRef(null);
+  const lastPreviewDigestRef = useRef("");
+
+  // ── Session list/search state ──
+  const [sessions, setSessions] = useState([]);
+  const [sessionListLoading, setSessionListLoading] = useState(false);
+  const [sessionSearchLoading, setSessionSearchLoading] = useState(false);
+  const [sessionListError, setSessionListError] = useState("");
+  const [sessionActionLoading, setSessionActionLoading] = useState("");
+  const [sessionSearch, setSessionSearch] = useState({
+    candidate: "",
+    party: "",
+    constituency: "",
+    state: "",
+  });
+
+  const resolvedQuerySessionId = toSessionId(querySessionId);
 
   // ── Scroll-based sidebar tracking ──
   useEffect(() => {
@@ -181,22 +315,189 @@ export default function NominationManualEntryPage() {
     return () => observers.forEach((o) => o.disconnect());
   }, [loadingSession]);
 
+  // ── Load backend form schema for future dynamic rendering parity ──
+  useEffect(() => {
+    let cancelled = false;
+    nominationAPI
+      .getFormSchema()
+      .then((schemaRes) => {
+        if (cancelled) return;
+        const schemaRoot =
+          schemaRes?.schema || schemaRes?.formSchema || schemaRes || {};
+        setSchemaFieldCount(countSchemaLeafPaths(schemaRoot));
+        setSchemaLoadError("");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setSchemaLoadError(err?.message || "Could not load nomination schema");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function loadNominationSessions({ filters = sessionSearch } = {}) {
+    const hasFilters = Object.values(filters || {}).some(
+      (value) => value !== undefined && value !== null && value !== "",
+    );
+
+    if (hasFilters) setSessionSearchLoading(true);
+    else setSessionListLoading(true);
+    setSessionListError("");
+
+    try {
+      const response = hasFilters
+        ? await nominationAPI.search(filters)
+        : await nominationAPI.getSessions();
+      setSessions(normalizeNominationSessionListResponse(response));
+    } catch (err) {
+      setSessionListError(
+        err?.message || "Failed to load nomination sessions.",
+      );
+    } finally {
+      if (hasFilters) setSessionSearchLoading(false);
+      else setSessionListLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadNominationSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Load existing session ──
   useEffect(() => {
-    if (!querySessionId) return;
+    if (!resolvedQuerySessionId) return;
     setLoadingSession(true);
     nominationAPI
-      .getSession(querySessionId)
+      .getSession(resolvedQuerySessionId)
       .then((data) => {
-        setSessionId(querySessionId);
+        setSessionId(resolvedQuerySessionId);
         const d = data.formData || data.session?.formData || data || {};
+        setSessionFormData(d);
+        resetFormState();
+        if (previewAbortRef.current) {
+          previewAbortRef.current.abort();
+        }
+        if (previewBlobUrlRef.current) {
+          window.URL.revokeObjectURL(previewBlobUrlRef.current);
+          previewBlobUrlRef.current = "";
+        }
+        if (previewHostRef.current) {
+          previewHostRef.current.innerHTML = "";
+        }
+        setPreviewBlobUrl("");
+        setPreviewPageCount(0);
+        setPreviewCurrentPage(1);
+        setPreviewError("");
+        setPreviewRenderError("");
+        setPreviewLastRefreshedAt(null);
+        setPreviewStale(true);
+        setPreviewLastRenderedSessionId("");
+        lastPreviewDigestRef.current = "";
         populateForm(d);
       })
-      .catch((err) =>
-        toast.error("Failed to load session: " + (err.message || "")),
-      )
+      .catch((err) => toast.error(err?.message || "Failed to load session."))
       .finally(() => setLoadingSession(false));
-  }, [querySessionId]);
+  }, [resolvedQuerySessionId]);
+
+  function resetFormState() {
+    setState("");
+    setCandidatePhotoUrl("");
+    setCandidateSignatureUrl("");
+
+    setPartI_constituency("");
+    setPartI_candidateName("");
+    setPartI_fatherName("");
+    setPartI_postalAddress("");
+    setPartI_candidateSlNo("");
+    setPartI_candidatePartNo("");
+    setPartI_candidateConstituency("");
+    setPartI_proposerName("");
+    setPartI_proposerSlNo("");
+    setPartI_proposerPartNo("");
+    setPartI_proposerConstituency("");
+    setPartI_date("");
+
+    setPartII_constituency("");
+    setPartII_candidateName("");
+    setPartII_fatherName("");
+    setPartII_postalAddress("");
+    setPartII_candidateSlNo("");
+    setPartII_candidatePartNo("");
+    setPartII_candidateConstituency("");
+    setProposers(Array.from({ length: 10 }, () => EMPTY_PROPOSER()));
+
+    setAge("");
+    setRecognisedParty("");
+    setUnrecognisedParty("");
+    setSymbol1("");
+    setSymbol2("");
+    setSymbol3("");
+    setLanguage("");
+    setCasteTribe("");
+    setScStState("");
+    setScStArea("");
+    setAssemblyState("");
+    setPartIII_date("");
+
+    setConvicted("No");
+    setCriminal_firNos("");
+    setCriminal_policeStation("");
+    setCriminal_district("");
+    setCriminal_state("");
+    setCriminal_sections("");
+    setCriminal_convictionDates("");
+    setCriminal_courts("");
+    setCriminal_punishment("");
+    setCriminal_releaseDates("");
+    setCriminal_appealFiled("No");
+    setCriminal_appealParticulars("");
+    setCriminal_appealCourts("");
+    setCriminal_appealStatus("");
+    setCriminal_disposalDates("");
+    setCriminal_orderNature("");
+
+    setOfficeOfProfit("No");
+    setOfficeOfProfit_details("");
+    setInsolvency("No");
+    setInsolvency_discharged("");
+    setForeignAllegiance("No");
+    setForeignAllegiance_details("");
+    setDisqualification_8A("No");
+    setDisqualification_period("");
+    setDismissalForCorruption("No");
+    setDismissal_date("");
+    setGovContracts("No");
+    setGovContracts_details("");
+    setManagingAgent("No");
+    setManagingAgent_details("");
+    setDisqualification_10A("No");
+    setSection10A_date("");
+
+    setPartIIIA_place("");
+    setPartIIIA_date("");
+
+    setPartIV_serialNo("");
+    setPartIV_hour("");
+    setPartIV_date("");
+    setPartIV_deliveredBy("");
+    setPartIV_roDate("");
+
+    setPartV_decision("");
+    setPartV_date("");
+
+    setPartVI_serialNo("");
+    setPartVI_candidateName("");
+    setPartVI_constituency("");
+    setPartVI_hour("");
+    setPartVI_date("");
+    setPartVI_scrutinyHour("");
+    setPartVI_scrutinyDate("");
+    setPartVI_scrutinyPlace("");
+    setPartVI_roDate("");
+  }
 
   // ── Populate form from loaded data ──
   function populateForm(d) {
@@ -319,12 +620,14 @@ export default function NominationManualEntryPage() {
   }
 
   // ── Build payload ──
-  function buildPayload() {
-    const payload = {
+  function buildPayload(includeSessionId = true) {
+    const payload = clonePayloadBase(sessionFormData);
+
+    Object.assign(payload, {
       state,
       candidatePhotoUrl,
       candidateSignatureUrl,
-      // Derive top-level fields for session listing
+      // Keep top-level summary fields populated for session metadata.
       candidateName: partI_candidateName || partII_candidateName || "",
       fatherMotherHusbandName: partI_fatherName || partII_fatherName || "",
       postalAddress: partI_postalAddress || partII_postalAddress || "",
@@ -351,9 +654,11 @@ export default function NominationManualEntryPage() {
       partII_candidateSlNo,
       partII_candidatePartNo,
       partII_candidateConstituency,
-      proposers: proposers.filter(
-        (p) => p.partNo || p.slNo || p.fullName || p.signature || p.date,
-      ),
+      // Keep proposer rows in order and cap at exactly 10 rows.
+      proposers: proposers.slice(0, 10).map((row) => ({
+        ...EMPTY_PROPOSER(),
+        ...(row || {}),
+      })),
       // Part III
       age,
       recognisedParty,
@@ -369,58 +674,38 @@ export default function NominationManualEntryPage() {
       partIII_date,
       // Part IIIA — Criminal
       convicted,
-      criminal_firNos: convicted === "Yes" ? criminal_firNos : "",
-      criminal_policeStation: convicted === "Yes" ? criminal_policeStation : "",
-      criminal_district: convicted === "Yes" ? criminal_district : "",
-      criminal_state: convicted === "Yes" ? criminal_state : "",
-      criminal_sections: convicted === "Yes" ? criminal_sections : "",
-      criminal_convictionDates:
-        convicted === "Yes" ? criminal_convictionDates : "",
-      criminal_courts: convicted === "Yes" ? criminal_courts : "",
-      criminal_punishment: convicted === "Yes" ? criminal_punishment : "",
-      criminal_releaseDates: convicted === "Yes" ? criminal_releaseDates : "",
-      criminal_appealFiled: convicted === "Yes" ? criminal_appealFiled : "No",
-      criminal_appealParticulars:
-        convicted === "Yes" && criminal_appealFiled === "Yes"
-          ? criminal_appealParticulars
-          : "",
-      criminal_appealCourts:
-        convicted === "Yes" && criminal_appealFiled === "Yes"
-          ? criminal_appealCourts
-          : "",
-      criminal_appealStatus:
-        convicted === "Yes" && criminal_appealFiled === "Yes"
-          ? criminal_appealStatus
-          : "",
-      criminal_disposalDates:
-        convicted === "Yes" && criminal_appealFiled === "Yes"
-          ? criminal_disposalDates
-          : "",
-      criminal_orderNature:
-        convicted === "Yes" && criminal_appealFiled === "Yes"
-          ? criminal_orderNature
-          : "",
+      criminal_firNos,
+      criminal_policeStation,
+      criminal_district,
+      criminal_state,
+      criminal_sections,
+      criminal_convictionDates,
+      criminal_courts,
+      criminal_punishment,
+      criminal_releaseDates,
+      criminal_appealFiled,
+      criminal_appealParticulars,
+      criminal_appealCourts,
+      criminal_appealStatus,
+      criminal_disposalDates,
+      criminal_orderNature,
       // Part IIIA — Disqualification
       officeOfProfit,
-      officeOfProfit_details:
-        officeOfProfit === "Yes" ? officeOfProfit_details : "",
+      officeOfProfit_details,
       insolvency,
-      insolvency_discharged: insolvency === "Yes" ? insolvency_discharged : "",
+      insolvency_discharged,
       foreignAllegiance,
-      foreignAllegiance_details:
-        foreignAllegiance === "Yes" ? foreignAllegiance_details : "",
+      foreignAllegiance_details,
       disqualification_8A,
-      disqualification_period:
-        disqualification_8A === "Yes" ? disqualification_period : "",
+      disqualification_period,
       dismissalForCorruption,
-      dismissal_date: dismissalForCorruption === "Yes" ? dismissal_date : "",
+      dismissal_date,
       govContracts,
-      govContracts_details: govContracts === "Yes" ? govContracts_details : "",
+      govContracts_details,
       managingAgent,
-      managingAgent_details:
-        managingAgent === "Yes" ? managingAgent_details : "",
+      managingAgent_details,
       disqualification_10A,
-      section10A_date: disqualification_10A === "Yes" ? section10A_date : "",
+      section10A_date,
       // Part IIIA — Place & Date
       partIIIA_place,
       partIIIA_date,
@@ -443,26 +728,34 @@ export default function NominationManualEntryPage() {
       partVI_scrutinyDate,
       partVI_scrutinyPlace,
       partVI_roDate,
-    };
-    if (sessionId) payload.sessionId = sessionId;
+    });
+
+    if (includeSessionId && sessionId) payload.sessionId = sessionId;
+    else delete payload.sessionId;
+
     return payload;
   }
+
+  const payloadSnapshot = buildPayload(false);
+  const payloadDigest = JSON.stringify(payloadSnapshot);
 
   // ── Image upload handler ──
   async function handleImageUpload(file, fieldName) {
     if (!file) return;
     const isPhoto = fieldName === "candidatePhotoUrl";
+    const uploadType = isPhoto ? "photo" : "signature";
     if (isPhoto) setUploadingPhoto(true);
     else setUploadingSignature(true);
     try {
-      const res = await nominationAPI.uploadImage(file);
-      if (res.url) {
-        if (isPhoto) setCandidatePhotoUrl(res.url);
-        else setCandidateSignatureUrl(res.url);
-        toast.success(`${isPhoto ? "Photo" : "Signature"} uploaded!`);
+      const res = await nominationAPI.uploadImage(file, uploadType);
+      if (!res?.url) {
+        throw new Error("Upload response missing image URL.");
       }
+      if (isPhoto) setCandidatePhotoUrl(res.url);
+      else setCandidateSignatureUrl(res.url);
+      toast.success(`${isPhoto ? "Photo" : "Signature"} uploaded!`);
     } catch (err) {
-      toast.error("Upload failed: " + (err.message || ""));
+      toast.error(err?.message || "Upload failed.");
     } finally {
       if (isPhoto) setUploadingPhoto(false);
       else setUploadingSignature(false);
@@ -470,43 +763,376 @@ export default function NominationManualEntryPage() {
   }
 
   // ── Save ──
-  async function handleSave() {
+  async function handleSave({ showToast = true } = {}) {
     setSaving(true);
+    setSaveError("");
     try {
-      const res = await nominationAPI.manualEntry(buildPayload());
-      if (res.sessionId && !sessionId) {
-        setSessionId(res.sessionId);
+      const payload = buildPayload();
+      const res = await nominationAPI.manualEntry(payload);
+      const nextSessionId = String(res?.sessionId || sessionId || "");
+
+      if (!nextSessionId) {
+        throw new Error("Save response missing sessionId.");
+      }
+
+      if (nextSessionId !== sessionId) {
+        setSessionId(nextSessionId);
+      }
+
+      if (toSessionId(router.query?.sessionId) !== nextSessionId) {
         router.replace(
-          { pathname: router.pathname, query: { sessionId: res.sessionId } },
+          { pathname: router.pathname, query: { sessionId: nextSessionId } },
           undefined,
           { shallow: true },
         );
       }
-      toast.success("Draft saved successfully!");
+
+      setSessionFormData(payload);
+      setLastSavedAt(new Date());
+      setLastSaveExportUrl(res?.exportUrl || "");
+      if (!res?.exportUrl) {
+        setSaveError("Save response missing exportUrl.");
+      }
+
+      loadNominationSessions({ filters: sessionSearch });
+
+      if (showToast) {
+        toast.success(res?.message || "Nomination saved.");
+      }
+      return nextSessionId;
     } catch (err) {
-      toast.error("Save failed: " + (err.message || "Unknown error"));
+      const message = err?.message || "Save failed.";
+      setSaveError(message);
+      if (showToast) {
+        toast.error(message);
+      }
+      throw err;
     } finally {
       setSaving(false);
     }
   }
 
-  // ── Export ──
-  async function handleExport() {
-    if (!sessionId) {
-      toast.error("Please save the draft first before exporting.");
+  function updateCurrentPreviewPage() {
+    const scroller = previewScrollRef.current;
+    const host = previewHostRef.current;
+    if (!scroller || !host) return;
+
+    const pages = getDocxPageElements(host);
+    if (!pages.length) {
+      setPreviewCurrentPage(1);
       return;
     }
+
+    const topAnchor =
+      scroller.getBoundingClientRect().top + scroller.clientHeight * 0.35;
+    let closestIndex = 0;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    pages.forEach((page, index) => {
+      const rect = page.getBoundingClientRect();
+      const center = rect.top + rect.height / 2;
+      const distance = Math.abs(center - topAnchor);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+    });
+
+    setPreviewCurrentPage(closestIndex + 1);
+  }
+
+  useEffect(() => {
+    const scroller = previewScrollRef.current;
+    if (!scroller) return undefined;
+    const onScroll = () => updateCurrentPreviewPage();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, [previewPageCount]);
+
+  async function renderDocxPreview(blob) {
+    if (!previewHostRef.current) return false;
+
+    previewHostRef.current.innerHTML = "";
+    const previewModule = await import("docx-preview");
+    await previewModule.renderAsync(blob, previewHostRef.current, undefined, {
+      breakPages: true,
+      inWrapper: true,
+      useBase64URL: true,
+      renderHeaders: true,
+      renderFooters: true,
+    });
+
+    const pages = getDocxPageElements(previewHostRef.current);
+    setPreviewPageCount(pages.length || 1);
+    setPreviewCurrentPage(1);
+    requestAnimationFrame(() => updateCurrentPreviewPage());
+    return true;
+  }
+
+  async function fetchPreviewEquivalentBlob(targetSessionId, options = {}) {
+    // Current backend parity: preview is generated from saved export DOCX.
+    const result = await nominationAPI.exportDocxBlob(targetSessionId, {
+      signal: options.signal,
+    });
+    return result?.blob;
+  }
+
+  async function requestPreviewEquivalent({ showToast = false } = {}) {
+    const requestId = previewRequestIdRef.current + 1;
+    previewRequestIdRef.current = requestId;
+
+    if (previewAbortRef.current) {
+      previewAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
+
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewRenderError("");
+
+    try {
+      const nextSessionId = await handleSave({ showToast: false });
+      const previewBlob = await fetchPreviewEquivalentBlob(nextSessionId, {
+        signal: controller.signal,
+      });
+      if (!previewBlob) {
+        throw new Error("No DOCX file returned by export endpoint.");
+      }
+
+      if (requestId !== previewRequestIdRef.current) return;
+
+      if (previewBlobUrlRef.current) {
+        window.URL.revokeObjectURL(previewBlobUrlRef.current);
+      }
+      const nextBlobUrl = window.URL.createObjectURL(previewBlob);
+      previewBlobUrlRef.current = nextBlobUrl;
+      setPreviewBlobUrl(nextBlobUrl);
+
+      try {
+        const rendered = await renderDocxPreview(previewBlob);
+        if (!rendered) {
+          setPreviewPageCount(0);
+        }
+      } catch (renderErr) {
+        setPreviewRenderError(
+          renderErr?.message || "Could not render DOCX preview in browser.",
+        );
+      }
+
+      setPreviewLastRefreshedAt(new Date());
+      setPreviewLastRenderedSessionId(nextSessionId);
+      lastPreviewDigestRef.current = payloadDigest;
+      setPreviewStale(false);
+
+      if (showToast) {
+        toast.success("Preview refreshed from latest saved state.");
+      }
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      if (requestId !== previewRequestIdRef.current) return;
+      const message = err?.message || "Failed to refresh document preview.";
+      setPreviewError(message);
+      if (showToast) {
+        toast.error(message);
+      }
+    } finally {
+      if (previewAbortRef.current === controller) {
+        previewAbortRef.current = null;
+      }
+      if (requestId === previewRequestIdRef.current) {
+        setPreviewLoading(false);
+      }
+    }
+  }
+
+  function handleRefreshPreview() {
+    setMobileViewTab("preview");
+    if (previewRefreshTimerRef.current) {
+      clearTimeout(previewRefreshTimerRef.current);
+    }
+    previewRefreshTimerRef.current = setTimeout(() => {
+      requestPreviewEquivalent({ showToast: true });
+    }, 420);
+  }
+
+  function downloadRenderedPreviewBlob() {
+    if (!previewBlobUrl) {
+      toast.error("No preview DOCX available yet.");
+      return;
+    }
+    const candidateName = partI_candidateName || partII_candidateName || "";
+    const link = document.createElement("a");
+    link.href = previewBlobUrl;
+    link.download = candidateName
+      ? `NominationPreview_${candidateName.replace(/[^a-zA-Z0-9]/g, "_")}.docx`
+      : "NominationPreview.docx";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  // ── Export ──
+  async function handleExport() {
     setExporting(true);
     try {
+      const id = await handleSave({ showToast: false });
       const name = partI_candidateName || partII_candidateName || "";
-      await nominationAPI.exportDocx(sessionId, name);
-      toast.success("DOCX downloaded!");
+      await nominationAPI.exportDocx(id, name);
+      toast.success("DOCX downloaded.");
     } catch (err) {
-      toast.error("Export failed: " + (err.message || ""));
+      toast.error(err?.message || "Export failed.");
     } finally {
       setExporting(false);
     }
   }
+
+  async function handleSessionSearchSubmit(event) {
+    event.preventDefault();
+    await loadNominationSessions({ filters: sessionSearch });
+  }
+
+  async function handleSessionSearchReset() {
+    const emptyFilters = {
+      candidate: "",
+      party: "",
+      constituency: "",
+      state: "",
+    };
+    setSessionSearch(emptyFilters);
+    await loadNominationSessions({ filters: emptyFilters });
+  }
+
+  function handleOpenSession(targetSessionId) {
+    if (!targetSessionId) return;
+    router.push(
+      {
+        pathname: router.pathname,
+        query: { sessionId: targetSessionId },
+      },
+      undefined,
+      { shallow: true },
+    );
+    setMobileViewTab("form");
+  }
+
+  async function handleRenameSession(entry) {
+    const entryId = String(entry?.id || entry?._id || entry?.sessionId || "");
+    if (!entryId) return;
+    const currentName =
+      entry?.name ||
+      entry?.sessionName ||
+      entry?.candidateName ||
+      entry?.candidate ||
+      "";
+    const nextName = window.prompt("Rename session", currentName);
+    if (nextName == null || nextName === "") return;
+
+    const actionKey = `rename-${entryId}`;
+    setSessionActionLoading(actionKey);
+    try {
+      await nominationAPI.renameSession(entryId, nextName);
+      await loadNominationSessions({ filters: sessionSearch });
+      toast.success("Session renamed.");
+    } catch (err) {
+      toast.error(err?.message || "Failed to rename session.");
+    } finally {
+      setSessionActionLoading("");
+    }
+  }
+
+  async function handleDeleteSession(entry) {
+    const entryId = String(entry?.id || entry?._id || entry?.sessionId || "");
+    if (!entryId) return;
+    const sessionLabel =
+      entry?.name ||
+      entry?.candidateName ||
+      entry?.candidate ||
+      entryId.slice(0, 8) ||
+      entryId;
+
+    if (!window.confirm(`Delete session ${sessionLabel}?`)) return;
+
+    const actionKey = `delete-${entryId}`;
+    setSessionActionLoading(actionKey);
+    try {
+      await nominationAPI.deleteSession(entryId);
+      if (sessionId === entryId) {
+        setSessionId(null);
+        setSessionFormData(null);
+        resetFormState();
+        setPreviewStale(true);
+        setPreviewLastRenderedSessionId("");
+        if (previewBlobUrlRef.current) {
+          window.URL.revokeObjectURL(previewBlobUrlRef.current);
+          previewBlobUrlRef.current = "";
+        }
+        if (previewHostRef.current) {
+          previewHostRef.current.innerHTML = "";
+        }
+        setPreviewBlobUrl("");
+        setPreviewPageCount(0);
+        setPreviewCurrentPage(1);
+        setPreviewError("");
+        setPreviewRenderError("");
+        setPreviewLastRefreshedAt(null);
+        lastPreviewDigestRef.current = "";
+        router.replace({ pathname: router.pathname }, undefined, {
+          shallow: true,
+        });
+      }
+      await loadNominationSessions({ filters: sessionSearch });
+      toast.success("Session deleted.");
+    } catch (err) {
+      toast.error(err?.message || "Failed to delete session.");
+    } finally {
+      setSessionActionLoading("");
+    }
+  }
+
+  useEffect(() => {
+    setPreviewStale(payloadDigest !== lastPreviewDigestRef.current);
+    if (previewAbortRef.current) {
+      previewAbortRef.current.abort();
+    }
+  }, [payloadDigest]);
+
+  useEffect(
+    () => () => {
+      if (previewAbortRef.current) {
+        previewAbortRef.current.abort();
+      }
+      if (previewRefreshTimerRef.current) {
+        clearTimeout(previewRefreshTimerRef.current);
+      }
+      if (previewBlobUrlRef.current) {
+        window.URL.revokeObjectURL(previewBlobUrlRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!previewBlobUrl || !previewHostRef.current) return;
+    if (previewHostRef.current.childElementCount > 0) return;
+    fetch(previewBlobUrl)
+      .then((res) => res.blob())
+      .then((blob) => renderDocxPreview(blob))
+      .catch((err) => {
+        setPreviewRenderError(
+          err?.message || "Could not render cached preview document.",
+        );
+      });
+  }, [previewBlobUrl, mobileViewTab]);
+
+  const lastSavedText = useMemo(() => {
+    if (!lastSavedAt) return "Not saved yet";
+    return new Date(lastSavedAt).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  }, [lastSavedAt]);
 
   // ── Scroll to section ──
   function scrollToSection(id) {
@@ -543,7 +1169,7 @@ export default function NominationManualEntryPage() {
 
   return (
     <ProtectedRoute allowedRoles={["admin"]}>
-      <div className="flex gap-6">
+      <div className="flex gap-4 xl:gap-6 items-start w-full">
         {/* ── Sidebar navigation ── */}
         <aside className="hidden lg:block w-64 shrink-0">
           <div className="sticky top-24 space-y-1">
@@ -567,7 +1193,7 @@ export default function NominationManualEntryPage() {
         </aside>
 
         {/* ── Main form area ── */}
-        <div className="flex-1 min-w-0 space-y-6 pb-32">
+        <div className="flex-[1.15] min-w-0 space-y-6 pb-32">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -589,8 +1215,34 @@ export default function NominationManualEntryPage() {
                     </span>
                   )}
                 </p>
+                {schemaLoadError ? (
+                  <p className="text-amber-300 text-xs mt-2 ml-14">
+                    Schema warning: {schemaLoadError}
+                  </p>
+                ) : (
+                  <p className="text-slate-500 text-xs mt-2 ml-14">
+                    Form schema fields discovered: {schemaFieldCount ?? "-"}
+                  </p>
+                )}
+                {saveError && (
+                  <p className="text-rose-300 text-xs mt-2 ml-14">
+                    Last save issue: {saveError}
+                  </p>
+                )}
+                {lastSaveExportUrl && (
+                  <p className="text-slate-500 text-xs mt-2 ml-14 break-all">
+                    Export URL: {lastSaveExportUrl}
+                  </p>
+                )}
               </div>
               <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMobileViewTab("preview")}
+                  className="btn btn-secondary text-sm"
+                >
+                  View Preview
+                </button>
                 <Link
                   href="/admin/dashboard"
                   className="btn btn-secondary text-sm"
@@ -601,726 +1253,1042 @@ export default function NominationManualEntryPage() {
             </div>
           </motion.div>
 
-          {/* ═══ Election Details (Header) ═══ */}
-          <SectionCard
-            id="header"
-            title="Election Details"
-            subtitle="FORM 2B — NOMINATION PAPER — [See rule 4 (1)] — Election to the Legislative Assembly of ____"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-              <Field
-                label='State (fills "Election to the Legislative Assembly of ____")'
-                placeholder='e.g. "WEST BENGAL"'
-                value={state}
-                onChange={setState}
-              />
+          <div className="lg:hidden card p-3">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setMobileViewTab("form")}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                  mobileViewTab === "form"
+                    ? "bg-neon-500/20 border border-neon-400/50 text-neon-100"
+                    : "border border-ink-400 text-slate-300"
+                }`}
+              >
+                Form
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileViewTab("preview")}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                  mobileViewTab === "preview"
+                    ? "bg-neon-500/20 border border-neon-400/50 text-neon-100"
+                    : "border border-ink-400 text-slate-300"
+                }`}
+              >
+                Document Preview
+              </button>
             </div>
+          </div>
 
-            {/* Image Uploads */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 border-t border-ink-400 pt-4">
-              <ImageUploadField
-                label="Candidate Photograph"
-                value={candidatePhotoUrl}
-                uploading={uploadingPhoto}
-                onFileSelect={(file) =>
-                  handleImageUpload(file, "candidatePhotoUrl")
-                }
-                onClear={() => setCandidatePhotoUrl("")}
-              />
-              <ImageUploadField
-                label="Candidate Signature"
-                value={candidateSignatureUrl}
-                uploading={uploadingSignature}
-                onFileSelect={(file) =>
-                  handleImageUpload(file, "candidateSignatureUrl")
-                }
-                onClear={() => setCandidateSignatureUrl("")}
-              />
-            </div>
-          </SectionCard>
-
-          {/* ═══ Part I — Recognised Party Nomination ═══ */}
-          <SectionCard
-            id="partI"
-            title="Part I — Nomination by Recognised Political Party"
-            subtitle="For use ONLY by a candidate set up by a recognised political party. One proposer suffices. If not applicable, leave blank and fill Part II instead."
+          <div
+            className={
+              mobileViewTab === "preview" ? "hidden lg:block" : "space-y-6"
+            }
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field
-                label="Assembly Constituency"
-                value={partI_constituency}
-                onChange={setPartI_constituency}
-              />
-              <Field
-                label="Candidate's Name"
-                value={partI_candidateName}
-                onChange={setPartI_candidateName}
-              />
-              <Field
-                label="Father's / Mother's / Husband's Name"
-                value={partI_fatherName}
-                onChange={setPartI_fatherName}
-              />
-              <Field
-                label="Candidate's Sl. No. in Electoral Roll"
-                value={partI_candidateSlNo}
-                onChange={setPartI_candidateSlNo}
-              />
-              <Field
-                label="Candidate's Part No. in Electoral Roll"
-                value={partI_candidatePartNo}
-                onChange={setPartI_candidatePartNo}
-              />
-              <Field
-                label="Candidate's Electoral Roll Constituency"
-                value={partI_candidateConstituency}
-                onChange={setPartI_candidateConstituency}
-              />
-            </div>
-            <TextareaField
-              label="Postal Address"
-              value={partI_postalAddress}
-              onChange={setPartI_postalAddress}
-              className="mt-4"
-            />
-            <div className="mt-6 border-t border-ink-400 pt-4">
-              <h4 className="text-sm font-semibold text-slate-200 mb-3">
-                Proposer (Single Proposer for Recognised Party)
-              </h4>
+            {/* ═══ Election Details (Header) ═══ */}
+            <SectionCard
+              id="header"
+              title="Election Details"
+              subtitle="FORM 2B — NOMINATION PAPER — [See rule 4 (1)] — Election to the Legislative Assembly of ____"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
+                <Field
+                  label='State (fills "Election to the Legislative Assembly of ____")'
+                  placeholder='e.g. "WEST BENGAL"'
+                  value={state}
+                  onChange={setState}
+                />
+              </div>
+
+              {/* Image Uploads */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 border-t border-ink-400 pt-4">
+                <ImageUploadField
+                  label="Candidate Photograph"
+                  value={candidatePhotoUrl}
+                  uploading={uploadingPhoto}
+                  onFileSelect={(file) =>
+                    handleImageUpload(file, "candidatePhotoUrl")
+                  }
+                  onClear={() => setCandidatePhotoUrl("")}
+                />
+                <ImageUploadField
+                  label="Candidate Signature"
+                  value={candidateSignatureUrl}
+                  uploading={uploadingSignature}
+                  onFileSelect={(file) =>
+                    handleImageUpload(file, "candidateSignatureUrl")
+                  }
+                  onClear={() => setCandidateSignatureUrl("")}
+                />
+              </div>
+            </SectionCard>
+
+            {/* ═══ Part I — Recognised Party Nomination ═══ */}
+            <SectionCard
+              id="partI"
+              title="Part I — Nomination by Recognised Political Party"
+              subtitle="For use ONLY by a candidate set up by a recognised political party. One proposer suffices. If not applicable, leave blank and fill Part II instead."
+            >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field
-                  label="Proposer's Name"
-                  value={partI_proposerName}
-                  onChange={setPartI_proposerName}
+                  label="Assembly Constituency"
+                  value={partI_constituency}
+                  onChange={setPartI_constituency}
                 />
                 <Field
-                  label="Proposer's Sl. No. in Electoral Roll"
-                  value={partI_proposerSlNo}
-                  onChange={setPartI_proposerSlNo}
+                  label="Candidate's Name"
+                  value={partI_candidateName}
+                  onChange={setPartI_candidateName}
                 />
                 <Field
-                  label="Proposer's Part No. in Electoral Roll"
-                  value={partI_proposerPartNo}
-                  onChange={setPartI_proposerPartNo}
+                  label="Father's / Mother's / Husband's Name"
+                  value={partI_fatherName}
+                  onChange={setPartI_fatherName}
                 />
                 <Field
-                  label="Proposer's Electoral Roll Constituency"
-                  value={partI_proposerConstituency}
-                  onChange={setPartI_proposerConstituency}
+                  label="Candidate's Sl. No. in Electoral Roll"
+                  value={partI_candidateSlNo}
+                  onChange={setPartI_candidateSlNo}
+                />
+                <Field
+                  label="Candidate's Part No. in Electoral Roll"
+                  value={partI_candidatePartNo}
+                  onChange={setPartI_candidatePartNo}
+                />
+                <Field
+                  label="Candidate's Electoral Roll Constituency"
+                  value={partI_candidateConstituency}
+                  onChange={setPartI_candidateConstituency}
+                />
+              </div>
+              <TextareaField
+                label="Postal Address"
+                value={partI_postalAddress}
+                onChange={setPartI_postalAddress}
+                className="mt-4"
+              />
+              <div className="mt-6 border-t border-ink-400 pt-4">
+                <h4 className="text-sm font-semibold text-slate-200 mb-3">
+                  Proposer (Single Proposer for Recognised Party)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field
+                    label="Proposer's Name"
+                    value={partI_proposerName}
+                    onChange={setPartI_proposerName}
+                  />
+                  <Field
+                    label="Proposer's Sl. No. in Electoral Roll"
+                    value={partI_proposerSlNo}
+                    onChange={setPartI_proposerSlNo}
+                  />
+                  <Field
+                    label="Proposer's Part No. in Electoral Roll"
+                    value={partI_proposerPartNo}
+                    onChange={setPartI_proposerPartNo}
+                  />
+                  <Field
+                    label="Proposer's Electoral Roll Constituency"
+                    value={partI_proposerConstituency}
+                    onChange={setPartI_proposerConstituency}
+                  />
+                  <Field
+                    label="Date"
+                    value={partI_date}
+                    onChange={setPartI_date}
+                    placeholder="DD/MM/YYYY"
+                  />
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* ═══ Part II — Nomination by 10 Proposers ═══ */}
+            <SectionCard
+              id="partII"
+              title="Part II — Nomination by 10 Proposers"
+              subtitle="For use ONLY by a candidate NOT set up by a recognised political party. Requires 10 electors of the constituency as proposers. If not applicable, leave blank and fill Part I instead."
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field
+                  label="Assembly Constituency"
+                  value={partII_constituency}
+                  onChange={setPartII_constituency}
+                />
+                <Field
+                  label="Candidate's Name"
+                  value={partII_candidateName}
+                  onChange={setPartII_candidateName}
+                />
+                <Field
+                  label="Father's / Mother's / Husband's Name"
+                  value={partII_fatherName}
+                  onChange={setPartII_fatherName}
+                />
+                <Field
+                  label="Candidate's Sl. No. in Electoral Roll"
+                  value={partII_candidateSlNo}
+                  onChange={setPartII_candidateSlNo}
+                />
+                <Field
+                  label="Candidate's Part No. in Electoral Roll"
+                  value={partII_candidatePartNo}
+                  onChange={setPartII_candidatePartNo}
+                />
+                <Field
+                  label="Candidate's Electoral Roll Constituency"
+                  value={partII_candidateConstituency}
+                  onChange={setPartII_candidateConstituency}
+                />
+              </div>
+              <TextareaField
+                label="Postal Address"
+                value={partII_postalAddress}
+                onChange={setPartII_postalAddress}
+                className="mt-4"
+              />
+
+              {/* Proposers Table */}
+              <div className="mt-6 border-t border-ink-400 pt-4">
+                <h4 className="text-sm font-semibold text-slate-200 mb-3">
+                  Particulars of the 10 Proposers and their Signatures
+                </h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="bg-ink-100/60">
+                        <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium w-10">
+                          #
+                        </th>
+                        <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
+                          Part No. of Electoral Roll
+                        </th>
+                        <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
+                          S.No. in that Part
+                        </th>
+                        <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
+                          Full Name
+                        </th>
+                        <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
+                          Signature
+                        </th>
+                        <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
+                          Date
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {proposers.map((p, idx) => (
+                        <tr key={idx} className="hover:bg-ink-100/30">
+                          <td className="border border-ink-400 px-3 py-1.5 text-slate-400 font-mono text-center">
+                            {idx + 1}
+                          </td>
+                          {[
+                            { key: "partNo", ph: "Part No." },
+                            { key: "slNo", ph: "Sl. No." },
+                            { key: "fullName", ph: "Full Name" },
+                            { key: "signature", ph: "Signed / Thumb" },
+                            { key: "date", ph: "DD/MM/YYYY" },
+                          ].map((col) => (
+                            <td
+                              key={col.key}
+                              className="border border-ink-400 px-1 py-1"
+                            >
+                              <input
+                                type="text"
+                                className="w-full text-sm border-0 bg-transparent focus:ring-1 focus:ring-neon-400 rounded px-2 py-1"
+                                placeholder={col.ph}
+                                value={p[col.key]}
+                                onChange={(e) =>
+                                  updateProposer(idx, col.key, e.target.value)
+                                }
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* ═══ Part III — Declaration by the Candidate ═══ */}
+            <SectionCard
+              id="partIII"
+              title="Part III — Declaration by the Candidate"
+              subtitle='"I, a candidate at the above election, do hereby declare—"'
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field
+                  label="(a) Age (completed years)"
+                  value={age}
+                  onChange={setAge}
+                  placeholder="e.g. 52"
+                />
+                <Field
+                  label="(c)(i) Recognised National/State Party Name"
+                  value={recognisedParty}
+                  onChange={setRecognisedParty}
+                  placeholder="Fill if set up by recognised party"
+                />
+                <Field
+                  label="(c)(ii) Unrecognised Party Name"
+                  value={unrecognisedParty}
+                  onChange={setUnrecognisedParty}
+                  placeholder="Fill if set up by registered unrecognised party"
+                />
+                <Field
+                  label="(d)(i) Symbol — First Choice"
+                  value={symbol1}
+                  onChange={setSymbol1}
+                />
+                <Field
+                  label="(d)(ii) Symbol — Second Choice"
+                  value={symbol2}
+                  onChange={setSymbol2}
+                />
+                <Field
+                  label="(d)(iii) Symbol — Third Choice"
+                  value={symbol3}
+                  onChange={setSymbol3}
+                />
+                <Field
+                  label="(e) Name spelt in (Language)"
+                  value={language}
+                  onChange={setLanguage}
+                  placeholder="e.g. Bengali"
+                />
+                <Field
+                  label="(f) Caste/Tribe (if SC/ST)"
+                  value={casteTribe}
+                  onChange={setCasteTribe}
+                  placeholder="Leave blank if not applicable"
+                />
+                <Field
+                  label="(f) SC/ST of which State"
+                  value={scStState}
+                  onChange={setScStState}
+                />
+                <Field
+                  label="(f) SC/ST in relation to (Area)"
+                  value={scStArea}
+                  onChange={setScStArea}
+                />
+                <Field
+                  label="(h) Not nominated from more than 2 constituencies in State"
+                  value={assemblyState}
+                  onChange={setAssemblyState}
+                  placeholder="State name"
                 />
                 <Field
                   label="Date"
-                  value={partI_date}
-                  onChange={setPartI_date}
+                  value={partIII_date}
+                  onChange={setPartIII_date}
+                  placeholder="DD/MM/YYYY"
+                />
+              </div>
+            </SectionCard>
+
+            {/* ═══ Part IIIA — Criminal Record & Disqualification ═══ */}
+            <SectionCard
+              id="partIIIA"
+              title="Part IIIA — Criminal Record & Disqualification Declarations"
+              subtitle="To be filled by the candidate. Declarations under RP Act 1951 (Sections 8, 8A, 9, 9A, 10, 10A)."
+            >
+              {/* Criminal Record */}
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold text-slate-200 mb-3">
+                  Criminal Record
+                </h4>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-slate-300 mb-1">
+                    Has the candidate been convicted?
+                  </label>
+                  <select
+                    value={convicted}
+                    onChange={(e) => setConvicted(e.target.value)}
+                    className="w-full md:w-64"
+                  >
+                    <option value="No">No</option>
+                    <option value="Yes">Yes</option>
+                  </select>
+                </div>
+                <AnimatePresence>
+                  {convicted === "Yes" && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="space-y-4 border border-ink-400 rounded-xl p-4"
+                    >
+                      <TextareaField
+                        label="Case/FIR No./Nos."
+                        value={criminal_firNos}
+                        onChange={setCriminal_firNos}
+                      />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Field
+                          label="Police Station(s)"
+                          value={criminal_policeStation}
+                          onChange={setCriminal_policeStation}
+                        />
+                        <Field
+                          label="District(s)"
+                          value={criminal_district}
+                          onChange={setCriminal_district}
+                        />
+                        <Field
+                          label="State(s)"
+                          value={criminal_state}
+                          onChange={setCriminal_state}
+                        />
+                        <Field
+                          label="Date(s) of conviction(s)"
+                          value={criminal_convictionDates}
+                          onChange={setCriminal_convictionDates}
+                        />
+                        <Field
+                          label="Court(s) which convicted"
+                          value={criminal_courts}
+                          onChange={setCriminal_courts}
+                        />
+                        <Field
+                          label="Date(s) of release from prison"
+                          value={criminal_releaseDates}
+                          onChange={setCriminal_releaseDates}
+                        />
+                      </div>
+                      <TextareaField
+                        label="Section(s) and description of offence"
+                        value={criminal_sections}
+                        onChange={setCriminal_sections}
+                      />
+                      <TextareaField
+                        label="Punishment(s) imposed (period of imprisonment and/or fine)"
+                        value={criminal_punishment}
+                        onChange={setCriminal_punishment}
+                      />
+                      {/* Appeal sub-section */}
+                      <div className="border-t border-ink-400 pt-4">
+                        <div className="mb-3">
+                          <label className="block text-sm font-medium text-slate-300 mb-1">
+                            Appeal(s)/Revision(s) filed?
+                          </label>
+                          <select
+                            value={criminal_appealFiled}
+                            onChange={(e) =>
+                              setCriminal_appealFiled(e.target.value)
+                            }
+                            className="w-full md:w-64"
+                          >
+                            <option value="No">No</option>
+                            <option value="Yes">Yes</option>
+                          </select>
+                        </div>
+                        <AnimatePresence>
+                          {criminal_appealFiled === "Yes" && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="space-y-4"
+                            >
+                              <TextareaField
+                                label="Date and particulars of appeal(s)"
+                                value={criminal_appealParticulars}
+                                onChange={setCriminal_appealParticulars}
+                              />
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <Field
+                                  label="Court(s) for appeal(s)"
+                                  value={criminal_appealCourts}
+                                  onChange={setCriminal_appealCourts}
+                                />
+                                <Field
+                                  label="Appeal status (disposed of / pending)"
+                                  value={criminal_appealStatus}
+                                  onChange={setCriminal_appealStatus}
+                                />
+                                <Field
+                                  label="Date(s) of disposal"
+                                  value={criminal_disposalDates}
+                                  onChange={setCriminal_disposalDates}
+                                />
+                              </div>
+                              <TextareaField
+                                label="Nature of order(s) passed"
+                                value={criminal_orderNature}
+                                onChange={setCriminal_orderNature}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Disqualification Declarations */}
+              <div className="border-t border-ink-400 pt-6">
+                <h4 className="text-sm font-semibold text-slate-200 mb-4">
+                  Disqualification Declarations
+                </h4>
+                <div className="space-y-5">
+                  <YesNoField
+                    label="Holding office of profit under Government?"
+                    value={officeOfProfit}
+                    onChange={setOfficeOfProfit}
+                    detailLabel="Details of office held"
+                    detailValue={officeOfProfit_details}
+                    onDetailChange={setOfficeOfProfit_details}
+                    isTextarea
+                  />
+                  <YesNoField
+                    label="Declared insolvent / undischarged?"
+                    value={insolvency}
+                    onChange={setInsolvency}
+                    detailLabel="Discharged from insolvency?"
+                    detailValue={insolvency_discharged}
+                    onDetailChange={setInsolvency_discharged}
+                  />
+                  <YesNoField
+                    label="Under allegiance to foreign country?"
+                    value={foreignAllegiance}
+                    onChange={setForeignAllegiance}
+                    detailLabel="Foreign allegiance details"
+                    detailValue={foreignAllegiance_details}
+                    onDetailChange={setForeignAllegiance_details}
+                  />
+                  <YesNoField
+                    label="Disqualified under Section 8A of RP Act?"
+                    value={disqualification_8A}
+                    onChange={setDisqualification_8A}
+                    detailLabel="Period of disqualification"
+                    detailValue={disqualification_period}
+                    onDetailChange={setDisqualification_period}
+                  />
+                  <YesNoField
+                    label="Dismissed for corruption/disloyalty to State?"
+                    value={dismissalForCorruption}
+                    onChange={setDismissalForCorruption}
+                    detailLabel="Date of dismissal"
+                    detailValue={dismissal_date}
+                    onDetailChange={setDismissal_date}
+                  />
+                  <YesNoField
+                    label="Subsisting government contracts?"
+                    value={govContracts}
+                    onChange={setGovContracts}
+                    detailLabel="Government contract details"
+                    detailValue={govContracts_details}
+                    onDetailChange={setGovContracts_details}
+                    isTextarea
+                  />
+                  <YesNoField
+                    label="Managing agent/manager/secretary of company/corporation?"
+                    value={managingAgent}
+                    onChange={setManagingAgent}
+                    detailLabel="Company/Corporation details"
+                    detailValue={managingAgent_details}
+                    onDetailChange={setManagingAgent_details}
+                    isTextarea
+                  />
+                  <YesNoField
+                    label="Disqualified under Section 10A?"
+                    value={disqualification_10A}
+                    onChange={setDisqualification_10A}
+                    detailLabel="Date of disqualification under 10A"
+                    detailValue={section10A_date}
+                    onDetailChange={setSection10A_date}
+                  />
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* ═══ Part IIIA — Place & Date ═══ */}
+            <div id="section-partIIIA-foot" className="card scroll-mt-24">
+              <h3 className="text-sm font-semibold text-slate-200 mb-3">
+                Part IIIA — Place & Date
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field
+                  label="Place"
+                  value={partIIIA_place}
+                  onChange={setPartIIIA_place}
+                />
+                <Field
+                  label="Date"
+                  value={partIIIA_date}
+                  onChange={setPartIIIA_date}
                   placeholder="DD/MM/YYYY"
                 />
               </div>
             </div>
-          </SectionCard>
 
-          {/* ═══ Part II — Nomination by 10 Proposers ═══ */}
-          <SectionCard
-            id="partII"
-            title="Part II — Nomination by 10 Proposers"
-            subtitle="For use ONLY by a candidate NOT set up by a recognised political party. Requires 10 electors of the constituency as proposers. If not applicable, leave blank and fill Part I instead."
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field
-                label="Assembly Constituency"
-                value={partII_constituency}
-                onChange={setPartII_constituency}
-              />
-              <Field
-                label="Candidate's Name"
-                value={partII_candidateName}
-                onChange={setPartII_candidateName}
-              />
-              <Field
-                label="Father's / Mother's / Husband's Name"
-                value={partII_fatherName}
-                onChange={setPartII_fatherName}
-              />
-              <Field
-                label="Candidate's Sl. No. in Electoral Roll"
-                value={partII_candidateSlNo}
-                onChange={setPartII_candidateSlNo}
-              />
-              <Field
-                label="Candidate's Part No. in Electoral Roll"
-                value={partII_candidatePartNo}
-                onChange={setPartII_candidatePartNo}
-              />
-              <Field
-                label="Candidate's Electoral Roll Constituency"
-                value={partII_candidateConstituency}
-                onChange={setPartII_candidateConstituency}
-              />
-            </div>
-            <TextareaField
-              label="Postal Address"
-              value={partII_postalAddress}
-              onChange={setPartII_postalAddress}
-              className="mt-4"
-            />
-
-            {/* Proposers Table */}
-            <div className="mt-6 border-t border-ink-400 pt-4">
-              <h4 className="text-sm font-semibold text-slate-200 mb-3">
-                Particulars of the 10 Proposers and their Signatures
-              </h4>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="bg-ink-100/60">
-                      <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium w-10">
-                        #
-                      </th>
-                      <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
-                        Part No. of Electoral Roll
-                      </th>
-                      <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
-                        S.No. in that Part
-                      </th>
-                      <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
-                        Full Name
-                      </th>
-                      <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
-                        Signature
-                      </th>
-                      <th className="border border-ink-400 px-3 py-2 text-left text-slate-300 font-medium">
-                        Date
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {proposers.map((p, idx) => (
-                      <tr key={idx} className="hover:bg-ink-100/30">
-                        <td className="border border-ink-400 px-3 py-1.5 text-slate-400 font-mono text-center">
-                          {idx + 1}
-                        </td>
-                        {[
-                          { key: "partNo", ph: "Part No." },
-                          { key: "slNo", ph: "Sl. No." },
-                          { key: "fullName", ph: "Full Name" },
-                          { key: "signature", ph: "Signed / Thumb" },
-                          { key: "date", ph: "DD/MM/YYYY" },
-                        ].map((col) => (
-                          <td
-                            key={col.key}
-                            className="border border-ink-400 px-1 py-1"
-                          >
-                            <input
-                              type="text"
-                              className="w-full text-sm border-0 bg-transparent focus:ring-1 focus:ring-neon-400 rounded px-2 py-1"
-                              placeholder={col.ph}
-                              value={p[col.key]}
-                              onChange={(e) =>
-                                updateProposer(idx, col.key, e.target.value)
-                              }
-                            />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {/* ═══ Part IV — Returning Officer's Record ═══ */}
+            <SectionCard
+              id="partIV"
+              title="Part IV — Returning Officer's Record"
+              subtitle="To be filled in by the Returning Officer."
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field
+                  label="Serial No. of Nomination Paper"
+                  value={partIV_serialNo}
+                  onChange={setPartIV_serialNo}
+                />
+                <Field
+                  label="Hour of delivery"
+                  value={partIV_hour}
+                  onChange={setPartIV_hour}
+                  placeholder="e.g. 11:00"
+                />
+                <Field
+                  label="Date of delivery"
+                  value={partIV_date}
+                  onChange={setPartIV_date}
+                  placeholder="DD/MM/YYYY"
+                />
+                <Field
+                  label="Delivered by (candidate / proposer name)"
+                  value={partIV_deliveredBy}
+                  onChange={setPartIV_deliveredBy}
+                  placeholder='e.g. "Candidate" or proposer name'
+                />
+                <Field
+                  label="Returning Officer Date"
+                  value={partIV_roDate}
+                  onChange={setPartIV_roDate}
+                  placeholder="DD/MM/YYYY"
+                />
               </div>
-            </div>
-          </SectionCard>
+            </SectionCard>
 
-          {/* ═══ Part III — Declaration by the Candidate ═══ */}
-          <SectionCard
-            id="partIII"
-            title="Part III — Declaration by the Candidate"
-            subtitle='"I, a candidate at the above election, do hereby declare—"'
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field
-                label="(a) Age (completed years)"
-                value={age}
-                onChange={setAge}
-                placeholder="e.g. 52"
-              />
-              <Field
-                label="(c)(i) Recognised National/State Party Name"
-                value={recognisedParty}
-                onChange={setRecognisedParty}
-                placeholder="Fill if set up by recognised party"
-              />
-              <Field
-                label="(c)(ii) Unrecognised Party Name"
-                value={unrecognisedParty}
-                onChange={setUnrecognisedParty}
-                placeholder="Fill if set up by registered unrecognised party"
-              />
-              <Field
-                label="(d)(i) Symbol — First Choice"
-                value={symbol1}
-                onChange={setSymbol1}
-              />
-              <Field
-                label="(d)(ii) Symbol — Second Choice"
-                value={symbol2}
-                onChange={setSymbol2}
-              />
-              <Field
-                label="(d)(iii) Symbol — Third Choice"
-                value={symbol3}
-                onChange={setSymbol3}
-              />
-              <Field
-                label="(e) Name spelt in (Language)"
-                value={language}
-                onChange={setLanguage}
-                placeholder="e.g. Bengali"
-              />
-              <Field
-                label="(f) Caste/Tribe (if SC/ST)"
-                value={casteTribe}
-                onChange={setCasteTribe}
-                placeholder="Leave blank if not applicable"
-              />
-              <Field
-                label="(f) SC/ST of which State"
-                value={scStState}
-                onChange={setScStState}
-              />
-              <Field
-                label="(f) SC/ST in relation to (Area)"
-                value={scStArea}
-                onChange={setScStArea}
-              />
-              <Field
-                label="(h) Not nominated from more than 2 constituencies in State"
-                value={assemblyState}
-                onChange={setAssemblyState}
-                placeholder="State name"
+            {/* ═══ Part V — Decision on Scrutiny ═══ */}
+            <SectionCard
+              id="partV"
+              title="Part V — Decision of Returning Officer on Scrutiny"
+              subtitle='"I have examined this nomination paper in accordance with section 36 of the RP Act, 1951 and decide as follows:—"'
+            >
+              <TextareaField
+                label='Decision (e.g. "accepted" or "rejected on grounds of ____")'
+                value={partV_decision}
+                onChange={setPartV_decision}
+                rows={4}
               />
               <Field
                 label="Date"
-                value={partIII_date}
-                onChange={setPartIII_date}
+                value={partV_date}
+                onChange={setPartV_date}
                 placeholder="DD/MM/YYYY"
+                className="mt-4 md:w-1/2"
               />
-            </div>
-          </SectionCard>
+            </SectionCard>
 
-          {/* ═══ Part IIIA — Criminal Record & Disqualification ═══ */}
-          <SectionCard
-            id="partIIIA"
-            title="Part IIIA — Criminal Record & Disqualification Declarations"
-            subtitle="To be filled by the candidate. Declarations under RP Act 1951 (Sections 8, 8A, 9, 9A, 10, 10A)."
-          >
-            {/* Criminal Record */}
-            <div className="mb-6">
-              <h4 className="text-sm font-semibold text-slate-200 mb-3">
-                Criminal Record
-              </h4>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Has the candidate been convicted?
-                </label>
-                <select
-                  value={convicted}
-                  onChange={(e) => setConvicted(e.target.value)}
-                  className="w-full md:w-64"
+            {/* ═══ Part VI — Receipt & Notice of Scrutiny ═══ */}
+            <SectionCard
+              id="partVI"
+              title="Part VI — Receipt for Nomination Paper and Notice of Scrutiny"
+              subtitle="Receipt to be handed over to the person presenting the nomination paper."
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field
+                  label="Serial No. of Nomination Paper"
+                  value={partVI_serialNo}
+                  onChange={setPartVI_serialNo}
+                />
+                <Field
+                  label="Candidate Name"
+                  value={partVI_candidateName}
+                  onChange={setPartVI_candidateName}
+                />
+                <Field
+                  label="Assembly Constituency"
+                  value={partVI_constituency}
+                  onChange={setPartVI_constituency}
+                />
+                <Field
+                  label="Hour of delivery"
+                  value={partVI_hour}
+                  onChange={setPartVI_hour}
+                  placeholder="e.g. 11:00"
+                />
+                <Field
+                  label="Date of delivery"
+                  value={partVI_date}
+                  onChange={setPartVI_date}
+                  placeholder="DD/MM/YYYY"
+                />
+                <Field
+                  label="Scrutiny Hour"
+                  value={partVI_scrutinyHour}
+                  onChange={setPartVI_scrutinyHour}
+                  placeholder="e.g. 11:00"
+                />
+                <Field
+                  label="Scrutiny Date"
+                  value={partVI_scrutinyDate}
+                  onChange={setPartVI_scrutinyDate}
+                  placeholder="DD/MM/YYYY"
+                />
+                <Field
+                  label="Scrutiny Place"
+                  value={partVI_scrutinyPlace}
+                  onChange={setPartVI_scrutinyPlace}
+                  placeholder="e.g. Office of Returning Officer, Bidhannagar"
+                />
+                <Field
+                  label="Returning Officer Date"
+                  value={partVI_roDate}
+                  onChange={setPartVI_roDate}
+                  placeholder="DD/MM/YYYY"
+                />
+              </div>
+            </SectionCard>
+
+            {/* Bottom spacer for sticky bar */}
+            <div className="h-4" />
+          </div>
+        </div>
+
+        <div
+          className={`${mobileViewTab === "form" ? "hidden" : "flex"} lg:flex flex-col gap-4 lg:flex-[0.95] lg:min-w-[420px] w-full pb-32`}
+        >
+          <div className="card border-amber-400/20">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-100">
+                  Document Preview (from latest saved export)
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Save then export preview-equivalent flow (current backend
+                  parity)
+                </p>
+              </div>
+              {previewStale ? (
+                <span className="badge border-amber-500/60 text-amber-200 bg-amber-500/10">
+                  Stale preview
+                </span>
+              ) : (
+                <span className="badge border-emerald-500/60 text-emerald-200 bg-emerald-500/10">
+                  Up to date
+                </span>
+              )}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                Pages: {previewPageCount || 0}
+              </div>
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                Current: {previewCurrentPage || 1}
+              </div>
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                Last saved: {lastSavedText}
+              </div>
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2 break-all">
+                Last rendered from session:{" "}
+                {previewLastRenderedSessionId || "-"}
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleRefreshPreview}
+                disabled={previewLoading || saving}
+                className="btn btn-secondary text-xs"
+              >
+                {previewLoading ? "Refreshing..." : "Refresh Preview"}
+              </button>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={exporting || saving}
+                className="btn btn-secondary text-xs"
+              >
+                {exporting ? "Downloading..." : "Download DOCX"}
+              </button>
+              {previewBlobUrl && (
+                <button
+                  type="button"
+                  onClick={downloadRenderedPreviewBlob}
+                  className="btn btn-secondary text-xs"
                 >
-                  <option value="No">No</option>
-                  <option value="Yes">Yes</option>
-                </select>
+                  Download Preview DOCX
+                </button>
+              )}
+            </div>
+
+            {previewLoading && (
+              <div className="mt-4 rounded-xl border border-ink-400 bg-ink-100/50 p-6 flex flex-col items-center gap-2">
+                <div className="animate-spin rounded-full h-8 w-8 border-4 border-amber-400 border-t-transparent" />
+                <p className="text-xs text-slate-300">
+                  Rendering latest saved DOCX preview...
+                </p>
               </div>
-              <AnimatePresence>
-                {convicted === "Yes" && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="space-y-4 border border-ink-400 rounded-xl p-4"
+            )}
+
+            {previewError && (
+              <div className="mt-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3">
+                <p className="text-xs text-rose-100">{previewError}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRefreshPreview}
+                    className="btn btn-secondary text-xs"
                   >
-                    <TextareaField
-                      label="Case/FIR No./Nos."
-                      value={criminal_firNos}
-                      onChange={setCriminal_firNos}
-                    />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <Field
-                        label="Police Station(s)"
-                        value={criminal_policeStation}
-                        onChange={setCriminal_policeStation}
-                      />
-                      <Field
-                        label="District(s)"
-                        value={criminal_district}
-                        onChange={setCriminal_district}
-                      />
-                      <Field
-                        label="State(s)"
-                        value={criminal_state}
-                        onChange={setCriminal_state}
-                      />
-                      <Field
-                        label="Date(s) of conviction(s)"
-                        value={criminal_convictionDates}
-                        onChange={setCriminal_convictionDates}
-                      />
-                      <Field
-                        label="Court(s) which convicted"
-                        value={criminal_courts}
-                        onChange={setCriminal_courts}
-                      />
-                      <Field
-                        label="Date(s) of release from prison"
-                        value={criminal_releaseDates}
-                        onChange={setCriminal_releaseDates}
-                      />
-                    </div>
-                    <TextareaField
-                      label="Section(s) and description of offence"
-                      value={criminal_sections}
-                      onChange={setCriminal_sections}
-                    />
-                    <TextareaField
-                      label="Punishment(s) imposed (period of imprisonment and/or fine)"
-                      value={criminal_punishment}
-                      onChange={setCriminal_punishment}
-                    />
-                    {/* Appeal sub-section */}
-                    <div className="border-t border-ink-400 pt-4">
-                      <div className="mb-3">
-                        <label className="block text-sm font-medium text-slate-300 mb-1">
-                          Appeal(s)/Revision(s) filed?
-                        </label>
-                        <select
-                          value={criminal_appealFiled}
-                          onChange={(e) =>
-                            setCriminal_appealFiled(e.target.value)
-                          }
-                          className="w-full md:w-64"
-                        >
-                          <option value="No">No</option>
-                          <option value="Yes">Yes</option>
-                        </select>
-                      </div>
-                      <AnimatePresence>
-                        {criminal_appealFiled === "Yes" && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="space-y-4"
-                          >
-                            <TextareaField
-                              label="Date and particulars of appeal(s)"
-                              value={criminal_appealParticulars}
-                              onChange={setCriminal_appealParticulars}
-                            />
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <Field
-                                label="Court(s) for appeal(s)"
-                                value={criminal_appealCourts}
-                                onChange={setCriminal_appealCourts}
-                              />
-                              <Field
-                                label="Appeal status (disposed of / pending)"
-                                value={criminal_appealStatus}
-                                onChange={setCriminal_appealStatus}
-                              />
-                              <Field
-                                label="Date(s) of disposal"
-                                value={criminal_disposalDates}
-                                onChange={setCriminal_disposalDates}
-                              />
-                            </div>
-                            <TextareaField
-                              label="Nature of order(s) passed"
-                              value={criminal_orderNature}
-                              onChange={setCriminal_orderNature}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Disqualification Declarations */}
-            <div className="border-t border-ink-400 pt-6">
-              <h4 className="text-sm font-semibold text-slate-200 mb-4">
-                Disqualification Declarations
-              </h4>
-              <div className="space-y-5">
-                <YesNoField
-                  label="Holding office of profit under Government?"
-                  value={officeOfProfit}
-                  onChange={setOfficeOfProfit}
-                  detailLabel="Details of office held"
-                  detailValue={officeOfProfit_details}
-                  onDetailChange={setOfficeOfProfit_details}
-                  isTextarea
-                />
-                <YesNoField
-                  label="Declared insolvent / undischarged?"
-                  value={insolvency}
-                  onChange={setInsolvency}
-                  detailLabel="Discharged from insolvency?"
-                  detailValue={insolvency_discharged}
-                  onDetailChange={setInsolvency_discharged}
-                />
-                <YesNoField
-                  label="Under allegiance to foreign country?"
-                  value={foreignAllegiance}
-                  onChange={setForeignAllegiance}
-                  detailLabel="Foreign allegiance details"
-                  detailValue={foreignAllegiance_details}
-                  onDetailChange={setForeignAllegiance_details}
-                />
-                <YesNoField
-                  label="Disqualified under Section 8A of RP Act?"
-                  value={disqualification_8A}
-                  onChange={setDisqualification_8A}
-                  detailLabel="Period of disqualification"
-                  detailValue={disqualification_period}
-                  onDetailChange={setDisqualification_period}
-                />
-                <YesNoField
-                  label="Dismissed for corruption/disloyalty to State?"
-                  value={dismissalForCorruption}
-                  onChange={setDismissalForCorruption}
-                  detailLabel="Date of dismissal"
-                  detailValue={dismissal_date}
-                  onDetailChange={setDismissal_date}
-                />
-                <YesNoField
-                  label="Subsisting government contracts?"
-                  value={govContracts}
-                  onChange={setGovContracts}
-                  detailLabel="Government contract details"
-                  detailValue={govContracts_details}
-                  onDetailChange={setGovContracts_details}
-                  isTextarea
-                />
-                <YesNoField
-                  label="Managing agent/manager/secretary of company/corporation?"
-                  value={managingAgent}
-                  onChange={setManagingAgent}
-                  detailLabel="Company/Corporation details"
-                  detailValue={managingAgent_details}
-                  onDetailChange={setManagingAgent_details}
-                  isTextarea
-                />
-                <YesNoField
-                  label="Disqualified under Section 10A?"
-                  value={disqualification_10A}
-                  onChange={setDisqualification_10A}
-                  detailLabel="Date of disqualification under 10A"
-                  detailValue={section10A_date}
-                  onDetailChange={setSection10A_date}
-                />
+                    Retry Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExport}
+                    className="btn btn-secondary text-xs"
+                  >
+                    Download DOCX
+                  </button>
+                </div>
               </div>
-            </div>
-          </SectionCard>
+            )}
 
-          {/* ═══ Part IIIA — Place & Date ═══ */}
-          <div id="section-partIIIA-foot" className="card scroll-mt-24">
-            <h3 className="text-sm font-semibold text-slate-200 mb-3">
-              Part IIIA — Place & Date
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field
-                label="Place"
-                value={partIIIA_place}
-                onChange={setPartIIIA_place}
-              />
-              <Field
-                label="Date"
-                value={partIIIA_date}
-                onChange={setPartIIIA_date}
-                placeholder="DD/MM/YYYY"
-              />
-            </div>
+            {!previewLoading && !previewError && !previewBlobUrl && (
+              <div className="mt-4 rounded-xl border border-ink-400 bg-ink-100/40 p-5 text-center">
+                <p className="text-xs text-slate-400">
+                  No preview generated yet. Click Refresh Preview to render from
+                  latest saved state.
+                </p>
+              </div>
+            )}
+
+            {previewBlobUrl && (
+              <div
+                ref={previewScrollRef}
+                className="mt-4 max-h-[70vh] overflow-auto rounded-xl border border-ink-400 bg-ink-100/30 p-3"
+              >
+                <div ref={previewHostRef} className="docx-preview-host" />
+              </div>
+            )}
+
+            {previewRenderError && (
+              <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
+                <p className="text-xs text-amber-100">{previewRenderError}</p>
+                <p className="text-xs text-amber-200 mt-1">
+                  Browser rendering failed, but DOCX download remains available.
+                </p>
+              </div>
+            )}
+
+            {previewLastRefreshedAt && (
+              <p className="text-xs text-slate-500 mt-3">
+                Last preview refresh:{" "}
+                {new Date(previewLastRefreshedAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
+              </p>
+            )}
           </div>
 
-          {/* ═══ Part IV — Returning Officer's Record ═══ */}
-          <SectionCard
-            id="partIV"
-            title="Part IV — Returning Officer's Record"
-            subtitle="To be filled in by the Returning Officer."
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field
-                label="Serial No. of Nomination Paper"
-                value={partIV_serialNo}
-                onChange={setPartIV_serialNo}
-              />
-              <Field
-                label="Hour of delivery"
-                value={partIV_hour}
-                onChange={setPartIV_hour}
-                placeholder="e.g. 11:00"
-              />
-              <Field
-                label="Date of delivery"
-                value={partIV_date}
-                onChange={setPartIV_date}
-                placeholder="DD/MM/YYYY"
-              />
-              <Field
-                label="Delivered by (candidate / proposer name)"
-                value={partIV_deliveredBy}
-                onChange={setPartIV_deliveredBy}
-                placeholder='e.g. "Candidate" or proposer name'
-              />
-              <Field
-                label="Returning Officer Date"
-                value={partIV_roDate}
-                onChange={setPartIV_roDate}
-                placeholder="DD/MM/YYYY"
-              />
-            </div>
-          </SectionCard>
+          <div className="card border-ink-400/80">
+            <h2 className="text-sm font-semibold text-slate-100">
+              Session Management
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Search, open, rename, and delete nomination sessions.
+            </p>
 
-          {/* ═══ Part V — Decision on Scrutiny ═══ */}
-          <SectionCard
-            id="partV"
-            title="Part V — Decision of Returning Officer on Scrutiny"
-            subtitle='"I have examined this nomination paper in accordance with section 36 of the RP Act, 1951 and decide as follows:—"'
-          >
-            <TextareaField
-              label='Decision (e.g. "accepted" or "rejected on grounds of ____")'
-              value={partV_decision}
-              onChange={setPartV_decision}
-              rows={4}
-            />
-            <Field
-              label="Date"
-              value={partV_date}
-              onChange={setPartV_date}
-              placeholder="DD/MM/YYYY"
-              className="mt-4 md:w-1/2"
-            />
-          </SectionCard>
+            <form
+              onSubmit={handleSessionSearchSubmit}
+              className="mt-3 space-y-2"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Search candidate"
+                  value={sessionSearch.candidate}
+                  onChange={(e) =>
+                    setSessionSearch((prev) => ({
+                      ...prev,
+                      candidate: e.target.value,
+                    }))
+                  }
+                />
+                <input
+                  type="text"
+                  placeholder="Search party"
+                  value={sessionSearch.party}
+                  onChange={(e) =>
+                    setSessionSearch((prev) => ({
+                      ...prev,
+                      party: e.target.value,
+                    }))
+                  }
+                />
+                <input
+                  type="text"
+                  placeholder="Search constituency"
+                  value={sessionSearch.constituency}
+                  onChange={(e) =>
+                    setSessionSearch((prev) => ({
+                      ...prev,
+                      constituency: e.target.value,
+                    }))
+                  }
+                />
+                <input
+                  type="text"
+                  placeholder="Search state"
+                  value={sessionSearch.state}
+                  onChange={(e) =>
+                    setSessionSearch((prev) => ({
+                      ...prev,
+                      state: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={sessionSearchLoading}
+                  className="btn btn-secondary text-xs"
+                >
+                  {sessionSearchLoading ? "Searching..." : "Search Sessions"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSessionSearchReset}
+                  className="btn btn-secondary text-xs"
+                >
+                  Reset
+                </button>
+              </div>
+            </form>
 
-          {/* ═══ Part VI — Receipt & Notice of Scrutiny ═══ */}
-          <SectionCard
-            id="partVI"
-            title="Part VI — Receipt for Nomination Paper and Notice of Scrutiny"
-            subtitle="Receipt to be handed over to the person presenting the nomination paper."
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field
-                label="Serial No. of Nomination Paper"
-                value={partVI_serialNo}
-                onChange={setPartVI_serialNo}
-              />
-              <Field
-                label="Candidate Name"
-                value={partVI_candidateName}
-                onChange={setPartVI_candidateName}
-              />
-              <Field
-                label="Assembly Constituency"
-                value={partVI_constituency}
-                onChange={setPartVI_constituency}
-              />
-              <Field
-                label="Hour of delivery"
-                value={partVI_hour}
-                onChange={setPartVI_hour}
-                placeholder="e.g. 11:00"
-              />
-              <Field
-                label="Date of delivery"
-                value={partVI_date}
-                onChange={setPartVI_date}
-                placeholder="DD/MM/YYYY"
-              />
-              <Field
-                label="Scrutiny Hour"
-                value={partVI_scrutinyHour}
-                onChange={setPartVI_scrutinyHour}
-                placeholder="e.g. 11:00"
-              />
-              <Field
-                label="Scrutiny Date"
-                value={partVI_scrutinyDate}
-                onChange={setPartVI_scrutinyDate}
-                placeholder="DD/MM/YYYY"
-              />
-              <Field
-                label="Scrutiny Place"
-                value={partVI_scrutinyPlace}
-                onChange={setPartVI_scrutinyPlace}
-                placeholder="e.g. Office of Returning Officer, Bidhannagar"
-              />
-              <Field
-                label="Returning Officer Date"
-                value={partVI_roDate}
-                onChange={setPartVI_roDate}
-                placeholder="DD/MM/YYYY"
-              />
-            </div>
-          </SectionCard>
+            {sessionListError && (
+              <p className="text-xs text-rose-200 mt-3">{sessionListError}</p>
+            )}
 
-          {/* Bottom spacer for sticky bar */}
-          <div className="h-4" />
+            {sessionListLoading ? (
+              <p className="text-xs text-slate-400 mt-3">Loading sessions...</p>
+            ) : sessions.length === 0 ? (
+              <p className="text-xs text-slate-400 mt-3">
+                No nomination sessions found.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2 max-h-[36vh] overflow-auto pr-1">
+                {sessions.map((entry, idx) => {
+                  const entryId = String(
+                    entry?.id || entry?._id || entry?.sessionId || "",
+                  );
+                  const candidate =
+                    entry?.candidateName ||
+                    entry?.candidate ||
+                    entry?.name ||
+                    "Unnamed candidate";
+                  const partyName = entry?.party || "-";
+                  const constituencyName = entry?.constituency || "-";
+                  const stateName = entry?.state || "-";
+
+                  return (
+                    <div
+                      key={entryId || idx}
+                      className="rounded-xl border border-ink-400 bg-ink-100/50 p-3"
+                    >
+                      <p className="text-sm text-slate-100 font-semibold truncate">
+                        {candidate}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Party: {partyName} | Constituency: {constituencyName}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1 break-all">
+                        State: {stateName} | Session: {entryId || "-"}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSession(entryId)}
+                          disabled={!entryId}
+                          className="btn btn-secondary text-xs"
+                        >
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRenameSession(entry)}
+                          disabled={
+                            !entryId ||
+                            sessionActionLoading === `rename-${entryId}`
+                          }
+                          className="btn btn-secondary text-xs"
+                        >
+                          {sessionActionLoading === `rename-${entryId}`
+                            ? "Renaming..."
+                            : "Rename"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSession(entry)}
+                          disabled={
+                            !entryId ||
+                            sessionActionLoading === `delete-${entryId}`
+                          }
+                          className="btn btn-secondary text-xs"
+                        >
+                          {sessionActionLoading === `delete-${entryId}`
+                            ? "Deleting..."
+                            : "Delete"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* ── Sticky action bar ── */}
       <div className="fixed bottom-12 left-0 right-0 z-40">
-        <div className="mx-auto max-w-6xl px-4">
-          <div className="bg-ink-200/95 backdrop-blur border border-ink-400 rounded-2xl shadow-xl px-6 py-3 flex items-center justify-between">
-            <p className="text-xs text-slate-500 hidden sm:block">
-              Form 2B — Nomination Paper
-              {sessionId && (
-                <span className="text-emerald-400 ml-2">
-                  Session saved: {sessionId.slice(0, 8)}…
-                </span>
+        <div className="mx-auto max-w-7xl px-4">
+          <div className="bg-ink-200/95 backdrop-blur border border-ink-400 rounded-2xl shadow-xl px-4 md:px-6 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <p className="text-xs text-slate-500">
+              Form 2B workflow | Last saved: {lastSavedText}
+              {previewStale ? (
+                <span className="text-amber-300 ml-2">Preview stale</span>
+              ) : (
+                <span className="text-emerald-300 ml-2">Preview current</span>
               )}
             </p>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-2 md:gap-3">
               <button
                 type="button"
-                onClick={handleSave}
+                onClick={() => {
+                  handleSave({ showToast: true }).catch(() => {});
+                }}
                 disabled={saving}
                 className="btn bg-neon-600 hover:bg-neon-500 text-white text-sm shadow-card"
               >
-                {saving ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                      <circle
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                        fill="none"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                      />
-                    </svg>
-                    Saving...
-                  </span>
-                ) : (
-                  "💾 Save Draft"
-                )}
+                {saving ? "Saving..." : "Save Nomination"}
+              </button>
+              <button
+                type="button"
+                onClick={handleRefreshPreview}
+                disabled={previewLoading || saving}
+                className="btn btn-secondary text-sm"
+              >
+                {previewLoading ? "Refreshing..." : "Refresh Preview"}
               </button>
               <button
                 type="button"
                 onClick={handleExport}
-                disabled={!sessionId || exporting}
-                className={`btn text-sm ${
-                  sessionId
-                    ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-card"
-                    : "bg-ink-200 text-slate-500 cursor-not-allowed border border-ink-400"
-                }`}
+                disabled={exporting || saving}
+                className="btn bg-emerald-600 hover:bg-emerald-500 text-white text-sm shadow-card"
               >
-                {exporting ? "Exporting..." : "📥 Export DOCX"}
+                {exporting ? "Downloading..." : "Download DOCX"}
               </button>
             </div>
           </div>
