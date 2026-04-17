@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useAuth } from "../../context/AuthContext";
 import ProtectedRoute from "../../components/ProtectedRoute";
+import Layout from "../../components/Layout";
 import { nominationAPI } from "../../lib/api";
 import toast from "react-hot-toast";
 
@@ -119,6 +120,221 @@ function countSchemaLeafPaths(node) {
     (sum, key) => sum + countSchemaLeafPaths(node[key]),
     0,
   );
+}
+
+function pickFirstFiniteNumber(...values) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return null;
+}
+
+function pickFirstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+function normalizeMissingFieldList(rawValue) {
+  if (!rawValue) return [];
+  if (Array.isArray(rawValue)) {
+    return rawValue.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  if (typeof rawValue === "string") {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+      }
+    } catch {
+      // Fallback to CSV parsing.
+    }
+    return trimmed
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeNominationDbAudit(rawAudit) {
+  if (!rawAudit || typeof rawAudit !== "object") {
+    return {
+      expectedPersistedCount: null,
+      savedCount: null,
+      missingFields: [],
+      raw: rawAudit || null,
+    };
+  }
+
+  const expectedPersistedCount = pickFirstFiniteNumber(
+    rawAudit.expectedPersistedCount,
+    rawAudit.expectedCount,
+    rawAudit.expected,
+    rawAudit.totalFieldEntries,
+    rawAudit.totalFields,
+  );
+
+  const savedCount = pickFirstFiniteNumber(
+    rawAudit.savedCount,
+    rawAudit.persistedCount,
+    rawAudit.saved,
+    rawAudit.writtenCount,
+  );
+
+  const missingFields = normalizeMissingFieldList(
+    rawAudit.missingFields ||
+      rawAudit.missingRequired ||
+      rawAudit.missing ||
+      rawAudit.notPersisted,
+  );
+
+  return {
+    expectedPersistedCount,
+    savedCount,
+    missingFields,
+    raw: rawAudit,
+  };
+}
+
+function deriveTemplateAuditPassed(templateAudit, templateMissing = []) {
+  if (Array.isArray(templateMissing) && templateMissing.length > 0) {
+    return false;
+  }
+
+  if (typeof templateAudit === "boolean") return templateAudit;
+
+  if (templateAudit && typeof templateAudit === "object") {
+    const candidateKeys = ["valid", "passed", "ok", "success"];
+    for (const key of candidateKeys) {
+      if (typeof templateAudit[key] === "boolean") {
+        return templateAudit[key];
+      }
+    }
+
+    if (typeof templateAudit.status === "string") {
+      const normalized = templateAudit.status.trim().toLowerCase();
+      if (["pass", "passed", "ok", "success", "valid"].includes(normalized)) {
+        return true;
+      }
+      if (["fail", "failed", "invalid", "error"].includes(normalized)) {
+        return false;
+      }
+    }
+  }
+
+  if (typeof templateAudit === "string") {
+    const normalized = templateAudit.trim().toLowerCase();
+    if (
+      ["true", "pass", "passed", "ok", "success", "valid"].includes(normalized)
+    ) {
+      return true;
+    }
+    if (["false", "fail", "failed", "invalid", "error"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return null;
+}
+
+function flattenTemplateAuditWarnings(templateAudit) {
+  if (!templateAudit) return [];
+  if (Array.isArray(templateAudit)) {
+    return templateAudit
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+  if (typeof templateAudit === "string") {
+    return templateAudit.trim() ? [templateAudit.trim()] : [];
+  }
+  if (typeof templateAudit !== "object") {
+    return [];
+  }
+
+  const lines = [];
+  const stack = [["", templateAudit]];
+
+  while (stack.length && lines.length < 16) {
+    const [prefix, value] = stack.pop();
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => {
+        stack.push([`${prefix}[${index}]`, item]);
+      });
+      continue;
+    }
+
+    if (value && typeof value === "object") {
+      Object.entries(value).forEach(([key, child]) => {
+        const nextPrefix = prefix ? `${prefix}.${key}` : key;
+        stack.push([nextPrefix, child]);
+      });
+      continue;
+    }
+
+    if (value === false) {
+      lines.push(prefix || "Template audit check failed");
+      continue;
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) continue;
+      const looksWarning =
+        ["missing", "fail", "invalid", "error", "unresolved"].some((token) =>
+          trimmed.toLowerCase().includes(token),
+        ) ||
+        ["missing", "failed", "error", "unresolved"].some((token) =>
+          (prefix || "").toLowerCase().includes(token),
+        );
+      if (looksWarning) {
+        lines.push(prefix ? `${prefix}: ${trimmed}` : trimmed);
+      }
+    }
+  }
+
+  return lines;
+}
+
+function normalizeNominationPreviewMetadata(rawValue) {
+  const root = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const previewState =
+    root.previewState && typeof root.previewState === "object"
+      ? root.previewState
+      : {};
+  return {
+    pageCount: pickFirstFiniteNumber(
+      previewState.pageCount,
+      previewState.pages,
+      root.pageCount,
+      root.pages,
+    ),
+    renderedAt:
+      pickFirstNonEmptyString(
+        previewState.lastRenderedAt,
+        previewState.renderedAt,
+        previewState.generatedAt,
+        root.lastRenderedAt,
+        root.renderedAt,
+      ) || null,
+    renderedFromSessionId:
+      pickFirstNonEmptyString(
+        previewState.lastRenderedFromSessionId,
+        previewState.sessionId,
+        root.sessionId,
+      ) || null,
+    templateAudit:
+      root.templateAudit !== undefined
+        ? root.templateAudit
+        : previewState.templateAudit || null,
+    raw: root,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -261,8 +477,31 @@ export default function NominationManualEntryPage() {
   const [saveError, setSaveError] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [lastSaveExportUrl, setLastSaveExportUrl] = useState("");
+  const [saveDiagnostics, setSaveDiagnostics] = useState(null);
+  const [strictTemplateAudit, setStrictTemplateAudit] = useState(false);
 
-  // ── Preview-equivalent state ──
+  const [sessionValidation, setSessionValidation] = useState({
+    valid: null,
+    missingRequired: [],
+    details: null,
+    previewState: null,
+    validationSnapshot: null,
+    templateAudit: null,
+    lastCheckedAt: null,
+    error: "",
+  });
+  const [validationLoading, setValidationLoading] = useState(false);
+
+  const [previewMetadata, setPreviewMetadata] = useState({
+    pageCount: null,
+    renderedAt: null,
+    renderedFromSessionId: null,
+    templateAudit: null,
+    raw: null,
+    error: "",
+  });
+
+  // ── Preview state ──
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewRenderError, setPreviewRenderError] = useState("");
@@ -273,6 +512,19 @@ export default function NominationManualEntryPage() {
   const [previewLastRefreshedAt, setPreviewLastRefreshedAt] = useState(null);
   const [previewLastRenderedSessionId, setPreviewLastRenderedSessionId] =
     useState("");
+  const [
+    previewLastRenderedFromSessionAt,
+    setPreviewLastRenderedFromSessionAt,
+  ] = useState(null);
+  const [previewDiagnostics, setPreviewDiagnostics] = useState({
+    valid: null,
+    missingRequired: [],
+    templateAudit: null,
+    templateMissing: [],
+    templateAuditPassed: null,
+    pageCount: null,
+  });
+  const [previewSource, setPreviewSource] = useState("none");
   const previewHostRef = useRef(null);
   const previewScrollRef = useRef(null);
   const previewAbortRef = useRef(null);
@@ -395,8 +647,40 @@ export default function NominationManualEntryPage() {
         setPreviewLastRefreshedAt(null);
         setPreviewStale(true);
         setPreviewLastRenderedSessionId("");
+        setPreviewLastRenderedFromSessionAt(null);
+        setPreviewDiagnostics({
+          valid: null,
+          missingRequired: [],
+          templateAudit: null,
+          templateMissing: [],
+          templateAuditPassed: null,
+          pageCount: null,
+        });
+        setPreviewMetadata({
+          pageCount: null,
+          renderedAt: null,
+          renderedFromSessionId: null,
+          templateAudit: null,
+          raw: null,
+          error: "",
+        });
+        setSessionValidation({
+          valid: null,
+          missingRequired: [],
+          details: null,
+          previewState: null,
+          validationSnapshot: null,
+          templateAudit: null,
+          lastCheckedAt: null,
+          error: "",
+        });
+        setPreviewSource("none");
+        setSaveDiagnostics(null);
+        setLastSavedAt(null);
+        setLastSaveExportUrl("");
         lastPreviewDigestRef.current = "";
         populateForm(d);
+        refreshSessionStatus(resolvedQuerySessionId);
       })
       .catch((err) => toast.error(err?.message || "Failed to load session."))
       .finally(() => setLoadingSession(false));
@@ -762,6 +1046,132 @@ export default function NominationManualEntryPage() {
     }
   }
 
+  async function refreshSessionStatus(targetSessionId, options = {}) {
+    if (!targetSessionId) {
+      setSessionValidation((prev) => ({
+        ...prev,
+        valid: null,
+        missingRequired: [],
+        details: null,
+        previewState: null,
+        validationSnapshot: null,
+        templateAudit: null,
+        lastCheckedAt: null,
+        error: "",
+      }));
+      setPreviewMetadata((prev) => ({
+        ...prev,
+        pageCount: null,
+        renderedAt: null,
+        renderedFromSessionId: null,
+        templateAudit: null,
+        raw: null,
+        error: "",
+      }));
+      return null;
+    }
+
+    const includeTemplateAudit =
+      options.includeTemplateAudit ?? strictTemplateAudit;
+    const showToast = Boolean(options.showToast);
+
+    setValidationLoading(true);
+
+    const [validationResult, metadataResult] = await Promise.allSettled([
+      nominationAPI.getSessionValidation(targetSessionId, {
+        includeTemplateAudit,
+        signal: options.signal,
+      }),
+      nominationAPI.getPreviewMetadata(targetSessionId, {
+        includeTemplateAudit,
+        signal: options.signal,
+      }),
+    ]);
+
+    let nextValidationState = null;
+
+    if (validationResult.status === "fulfilled") {
+      const response = validationResult.value || {};
+      const missingRequired = normalizeMissingFieldList(
+        response.missingRequired || response.missingRequiredLabels,
+      );
+
+      nextValidationState = {
+        valid:
+          typeof response.valid === "boolean"
+            ? response.valid
+            : missingRequired.length
+              ? false
+              : null,
+        missingRequired,
+        details: response.details || null,
+        previewState:
+          response.previewState && typeof response.previewState === "object"
+            ? response.previewState
+            : null,
+        validationSnapshot: response.validationSnapshot || null,
+        templateAudit:
+          response.templateAudit !== undefined ? response.templateAudit : null,
+        lastCheckedAt: new Date(),
+        error: "",
+      };
+      setSessionValidation(nextValidationState);
+    } else {
+      const message =
+        validationResult.reason?.message || "Validation status fetch failed.";
+      setSessionValidation((prev) => ({
+        ...prev,
+        valid: null,
+        lastCheckedAt: new Date(),
+        error: message,
+      }));
+    }
+
+    if (metadataResult.status === "fulfilled") {
+      const normalizedMetadata = normalizeNominationPreviewMetadata(
+        metadataResult.value,
+      );
+      setPreviewMetadata({
+        ...normalizedMetadata,
+        error: "",
+      });
+
+      if (normalizedMetadata.renderedFromSessionId) {
+        setPreviewLastRenderedSessionId(
+          normalizedMetadata.renderedFromSessionId,
+        );
+      }
+      if (normalizedMetadata.renderedAt) {
+        setPreviewLastRenderedFromSessionAt(normalizedMetadata.renderedAt);
+      }
+    } else {
+      const message =
+        metadataResult.reason?.message || "Preview metadata fetch failed.";
+      setPreviewMetadata((prev) => ({
+        ...prev,
+        error: message,
+      }));
+    }
+
+    setValidationLoading(false);
+
+    if (showToast) {
+      if (validationResult.status === "fulfilled") {
+        toast.success("Validation and preview metadata refreshed.");
+      } else {
+        toast.error("Validation refresh failed.");
+      }
+    }
+
+    return {
+      validation:
+        validationResult.status === "fulfilled" ? validationResult.value : null,
+      metadata:
+        metadataResult.status === "fulfilled" ? metadataResult.value : null,
+      nextValidationState,
+    };
+  }
+
   // ── Save ──
   async function handleSave({ showToast = true } = {}) {
     setSaving(true);
@@ -788,11 +1198,20 @@ export default function NominationManualEntryPage() {
       }
 
       setSessionFormData(payload);
-      setLastSavedAt(new Date());
+      const savedAt = new Date();
+      setLastSavedAt(savedAt);
       setLastSaveExportUrl(res?.exportUrl || "");
-      if (!res?.exportUrl) {
-        setSaveError("Save response missing exportUrl.");
-      }
+      setSaveDiagnostics({
+        ...normalizeNominationDbAudit(res?.dbAudit || res?.session?.dbAudit),
+        savedAt,
+        exportUrl: res?.exportUrl || "",
+        previewUrl: res?.previewUrl || "",
+        validationUrl: res?.validationUrl || "",
+      });
+
+      await refreshSessionStatus(nextSessionId, {
+        includeTemplateAudit: strictTemplateAudit,
+      });
 
       loadNominationSessions({ filters: sessionSearch });
 
@@ -869,15 +1288,10 @@ export default function NominationManualEntryPage() {
     return true;
   }
 
-  async function fetchPreviewEquivalentBlob(targetSessionId, options = {}) {
-    // Current backend parity: preview is generated from saved export DOCX.
-    const result = await nominationAPI.exportDocxBlob(targetSessionId, {
-      signal: options.signal,
-    });
-    return result?.blob;
-  }
-
-  async function requestPreviewEquivalent({ showToast = false } = {}) {
+  async function requestPreview({
+    source = "payload",
+    showToast = false,
+  } = {}) {
     const requestId = previewRequestIdRef.current + 1;
     previewRequestIdRef.current = requestId;
 
@@ -892,12 +1306,43 @@ export default function NominationManualEntryPage() {
     setPreviewRenderError("");
 
     try {
-      const nextSessionId = await handleSave({ showToast: false });
-      const previewBlob = await fetchPreviewEquivalentBlob(nextSessionId, {
-        signal: controller.signal,
-      });
+      const preferredSource =
+        source === "session" && sessionId ? "session" : "payload";
+      let result = null;
+      let resolvedSource = preferredSource;
+      let usedFallback = false;
+
+      if (preferredSource === "session") {
+        result = await nominationAPI.previewDocxFromSessionDetailed(sessionId, {
+          signal: controller.signal,
+        });
+      } else {
+        try {
+          result = await nominationAPI.previewDocxFromPayloadDetailed(
+            buildPayload(false),
+            {
+              signal: controller.signal,
+            },
+          );
+        } catch (livePreviewError) {
+          if (!sessionId) throw livePreviewError;
+          result = await nominationAPI.previewDocxFromSessionDetailed(
+            sessionId,
+            {
+              signal: controller.signal,
+            },
+          );
+          resolvedSource = "session";
+          usedFallback = true;
+          setPreviewError(
+            `Live preview failed (${livePreviewError?.message || "request error"}). Showing the last saved session preview instead.`,
+          );
+        }
+      }
+
+      const previewBlob = result?.blob;
       if (!previewBlob) {
-        throw new Error("No DOCX file returned by export endpoint.");
+        throw new Error("No DOCX preview returned by backend.");
       }
 
       if (requestId !== previewRequestIdRef.current) return;
@@ -920,18 +1365,78 @@ export default function NominationManualEntryPage() {
         );
       }
 
+      const diagnostics = result?.diagnostics || {};
+      const normalizedMissingRequired = normalizeMissingFieldList(
+        diagnostics.missingRequired,
+      );
+      const normalizedTemplateMissing = normalizeMissingFieldList(
+        diagnostics.templateMissing,
+      );
+      const normalizedTemplateAuditPassed =
+        typeof diagnostics.templateAuditPassed === "boolean"
+          ? diagnostics.templateAuditPassed
+          : deriveTemplateAuditPassed(
+              diagnostics.templateAudit,
+              normalizedTemplateMissing,
+            );
+
+      setPreviewDiagnostics({
+        valid:
+          typeof diagnostics.valid === "boolean" ? diagnostics.valid : null,
+        missingRequired: normalizedMissingRequired,
+        templateAudit:
+          diagnostics.templateAudit !== undefined
+            ? diagnostics.templateAudit
+            : null,
+        templateMissing: normalizedTemplateMissing,
+        templateAuditPassed: normalizedTemplateAuditPassed,
+        pageCount: pickFirstFiniteNumber(diagnostics.pageCount),
+      });
+
+      if (
+        pickFirstFiniteNumber(diagnostics.pageCount) &&
+        (previewHostRef.current?.childElementCount || 0) === 0
+      ) {
+        setPreviewPageCount(Number(diagnostics.pageCount));
+      }
+
       setPreviewLastRefreshedAt(new Date());
-      setPreviewLastRenderedSessionId(nextSessionId);
+      setPreviewSource(resolvedSource);
+
+      if (resolvedSource === "session" && sessionId) {
+        setPreviewLastRenderedSessionId(sessionId);
+      } else {
+        setPreviewLastRenderedSessionId("");
+        setPreviewLastRenderedFromSessionAt(null);
+      }
+
       lastPreviewDigestRef.current = payloadDigest;
       setPreviewStale(false);
 
+      if (resolvedSource === "session" && sessionId) {
+        refreshSessionStatus(sessionId, {
+          includeTemplateAudit: strictTemplateAudit,
+          signal: controller.signal,
+        });
+      }
+
       if (showToast) {
-        toast.success("Preview refreshed from latest saved state.");
+        if (usedFallback) {
+          toast.success(
+            "Live preview failed, showing latest saved session preview.",
+          );
+        } else if (resolvedSource === "session") {
+          toast.success("Preview refreshed from saved session.");
+        } else {
+          toast.success("Preview refreshed from current form values.");
+        }
       }
     } catch (err) {
       if (err?.name === "AbortError") return;
       if (requestId !== previewRequestIdRef.current) return;
-      const message = err?.message || "Failed to refresh document preview.";
+      const message =
+        err?.message ||
+        "Failed to render preview. Check required fields and try again.";
       setPreviewError(message);
       if (showToast) {
         toast.error(message);
@@ -946,13 +1451,24 @@ export default function NominationManualEntryPage() {
     }
   }
 
+  function handlePreviewDocument() {
+    setMobileViewTab("preview");
+    requestPreview({
+      source: sessionId && !previewStale ? "session" : "payload",
+      showToast: true,
+    });
+  }
+
   function handleRefreshPreview() {
     setMobileViewTab("preview");
     if (previewRefreshTimerRef.current) {
       clearTimeout(previewRefreshTimerRef.current);
     }
     previewRefreshTimerRef.current = setTimeout(() => {
-      requestPreviewEquivalent({ showToast: true });
+      requestPreview({
+        source: sessionId && !previewStale ? "session" : "payload",
+        showToast: true,
+      });
     }, 420);
   }
 
@@ -978,7 +1494,40 @@ export default function NominationManualEntryPage() {
     try {
       const id = await handleSave({ showToast: false });
       const name = partI_candidateName || partII_candidateName || "";
-      await nominationAPI.exportDocx(id, name);
+      const exportResult = await nominationAPI.exportDocx(id, name, {
+        strictTemplateAudit,
+      });
+      const exportDiagnostics = exportResult?.diagnostics || null;
+      if (exportDiagnostics) {
+        const templateMissing = normalizeMissingFieldList(
+          exportDiagnostics.templateMissing,
+        );
+        setPreviewDiagnostics((prev) => ({
+          ...prev,
+          valid:
+            typeof exportDiagnostics.valid === "boolean"
+              ? exportDiagnostics.valid
+              : prev.valid,
+          missingRequired: normalizeMissingFieldList(
+            exportDiagnostics.missingRequired,
+          ),
+          templateAudit:
+            exportDiagnostics.templateAudit !== undefined
+              ? exportDiagnostics.templateAudit
+              : prev.templateAudit,
+          templateMissing,
+          templateAuditPassed:
+            typeof exportDiagnostics.templateAuditPassed === "boolean"
+              ? exportDiagnostics.templateAuditPassed
+              : deriveTemplateAuditPassed(
+                  exportDiagnostics.templateAudit,
+                  templateMissing,
+                ),
+          pageCount:
+            pickFirstFiniteNumber(exportDiagnostics.pageCount) ||
+            prev.pageCount,
+        }));
+      }
       toast.success("DOCX downloaded.");
     } catch (err) {
       toast.error(err?.message || "Export failed.");
@@ -1061,8 +1610,39 @@ export default function NominationManualEntryPage() {
         setSessionId(null);
         setSessionFormData(null);
         resetFormState();
+        setSaveDiagnostics(null);
+        setLastSavedAt(null);
+        setLastSaveExportUrl("");
         setPreviewStale(true);
         setPreviewLastRenderedSessionId("");
+        setPreviewLastRenderedFromSessionAt(null);
+        setPreviewDiagnostics({
+          valid: null,
+          missingRequired: [],
+          templateAudit: null,
+          templateMissing: [],
+          templateAuditPassed: null,
+          pageCount: null,
+        });
+        setPreviewMetadata({
+          pageCount: null,
+          renderedAt: null,
+          renderedFromSessionId: null,
+          templateAudit: null,
+          raw: null,
+          error: "",
+        });
+        setSessionValidation({
+          valid: null,
+          missingRequired: [],
+          details: null,
+          previewState: null,
+          validationSnapshot: null,
+          templateAudit: null,
+          lastCheckedAt: null,
+          error: "",
+        });
+        setPreviewSource("none");
         if (previewBlobUrlRef.current) {
           window.URL.revokeObjectURL(previewBlobUrlRef.current);
           previewBlobUrlRef.current = "";
@@ -1095,7 +1675,35 @@ export default function NominationManualEntryPage() {
     if (previewAbortRef.current) {
       previewAbortRef.current.abort();
     }
+
+    if (previewRefreshTimerRef.current) {
+      clearTimeout(previewRefreshTimerRef.current);
+    }
+    previewRefreshTimerRef.current = setTimeout(() => {
+      requestPreview({ source: "payload" });
+    }, 420);
+
+    return () => {
+      if (previewRefreshTimerRef.current) {
+        clearTimeout(previewRefreshTimerRef.current);
+      }
+    };
   }, [payloadDigest]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (previewBlobUrlRef.current) return;
+    requestPreview({ source: "session" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    refreshSessionStatus(sessionId, {
+      includeTemplateAudit: strictTemplateAudit,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strictTemplateAudit, sessionId]);
 
   useEffect(
     () => () => {
@@ -1133,6 +1741,131 @@ export default function NominationManualEntryPage() {
       second: "2-digit",
     });
   }, [lastSavedAt]);
+
+  const persistedMissingFields = saveDiagnostics?.missingFields || [];
+  const saveExpectedCount = saveDiagnostics?.expectedPersistedCount;
+  const savePersistedCount = saveDiagnostics?.savedCount;
+  const persistenceStatusLabel = saveDiagnostics
+    ? persistedMissingFields.length
+      ? "Needs attention"
+      : "Saved"
+    : "Not saved";
+
+  const effectiveMissingRequired = useMemo(
+    () =>
+      normalizeMissingFieldList(
+        sessionValidation?.missingRequired?.length
+          ? sessionValidation.missingRequired
+          : previewDiagnostics.missingRequired,
+      ),
+    [sessionValidation?.missingRequired, previewDiagnostics?.missingRequired],
+  );
+
+  const effectiveValidationFlag =
+    typeof sessionValidation?.valid === "boolean"
+      ? sessionValidation.valid
+      : typeof previewDiagnostics?.valid === "boolean"
+        ? previewDiagnostics.valid
+        : null;
+
+  const validationNeedsAttention =
+    effectiveValidationFlag === false || effectiveMissingRequired.length > 0;
+  const validationLabel =
+    effectiveValidationFlag === true && !validationNeedsAttention
+      ? "Valid"
+      : validationNeedsAttention
+        ? "Needs attention"
+        : "Unknown";
+
+  const effectiveTemplateAudit =
+    sessionValidation?.templateAudit ??
+    previewMetadata?.templateAudit ??
+    previewDiagnostics?.templateAudit;
+  const effectiveTemplateMissing = useMemo(
+    () => normalizeMissingFieldList(previewDiagnostics?.templateMissing),
+    [previewDiagnostics?.templateMissing],
+  );
+  const templateAuditWarnings = useMemo(() => {
+    const warningLines = [
+      ...effectiveTemplateMissing,
+      ...flattenTemplateAuditWarnings(effectiveTemplateAudit),
+    ];
+    return [...new Set(warningLines)].filter(Boolean);
+  }, [effectiveTemplateMissing, effectiveTemplateAudit]);
+  const templateAuditPassed = deriveTemplateAuditPassed(
+    effectiveTemplateAudit,
+    effectiveTemplateMissing,
+  );
+  const templateAuditLabel =
+    templateAuditPassed === true
+      ? "Pass"
+      : templateAuditPassed === false || templateAuditWarnings.length
+        ? "Needs attention"
+        : "Unknown";
+
+  const previewEffectivePageCount =
+    previewPageCount ||
+    pickFirstFiniteNumber(
+      previewDiagnostics?.pageCount,
+      previewMetadata?.pageCount,
+      sessionValidation?.previewState?.pageCount,
+      sessionValidation?.previewState?.pages,
+    ) ||
+    0;
+
+  const lastRenderedFromSessionText = useMemo(() => {
+    const renderedSessionId =
+      previewLastRenderedSessionId || previewMetadata?.renderedFromSessionId;
+    const renderedAtRaw =
+      previewLastRenderedFromSessionAt ||
+      previewMetadata?.renderedAt ||
+      sessionValidation?.previewState?.lastRenderedAt ||
+      sessionValidation?.previewState?.renderedAt ||
+      null;
+
+    const renderedAtLabel = (() => {
+      if (!renderedAtRaw) return "";
+      const date = new Date(renderedAtRaw);
+      if (Number.isNaN(date.getTime())) return String(renderedAtRaw);
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    })();
+
+    if (!renderedSessionId && !renderedAtLabel) return "-";
+    if (!renderedSessionId) return renderedAtLabel;
+    const compactSession =
+      renderedSessionId.length > 10
+        ? `${renderedSessionId.slice(0, 8)}…`
+        : renderedSessionId;
+    return renderedAtLabel
+      ? `${compactSession} @ ${renderedAtLabel}`
+      : compactSession;
+  }, [
+    previewLastRenderedSessionId,
+    previewMetadata?.renderedFromSessionId,
+    previewLastRenderedFromSessionAt,
+    previewMetadata?.renderedAt,
+    sessionValidation?.previewState,
+  ]);
+
+  const validationDetailEntries = useMemo(() => {
+    const details = sessionValidation?.details;
+    if (!details || typeof details !== "object" || Array.isArray(details)) {
+      return [];
+    }
+    return Object.entries(details)
+      .slice(0, 10)
+      .map(([key, value]) => {
+        if (value == null) return `${key}: -`;
+        if (typeof value === "object") {
+          return `${key}: ${JSON.stringify(value)}`;
+        }
+        return `${key}: ${String(value)}`;
+      });
+  }, [sessionValidation?.details]);
 
   // ── Scroll to section ──
   function scrollToSection(id) {
@@ -1238,10 +1971,10 @@ export default function NominationManualEntryPage() {
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setMobileViewTab("preview")}
+                  onClick={handlePreviewDocument}
                   className="btn btn-secondary text-sm"
                 >
-                  View Preview
+                  Preview Document
                 </button>
                 <Link
                   href="/admin/dashboard"
@@ -1268,7 +2001,7 @@ export default function NominationManualEntryPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setMobileViewTab("preview")}
+                onClick={handlePreviewDocument}
                 className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
                   mobileViewTab === "preview"
                     ? "bg-neon-500/20 border border-neon-400/50 text-neon-100"
@@ -1959,11 +2692,11 @@ export default function NominationManualEntryPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-slate-100">
-                  Document Preview (from latest saved export)
+                  Document Preview
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Save then export preview-equivalent flow (current backend
-                  parity)
+                  Live preview uses unsaved payload. If that fails, preview
+                  falls back to the latest saved session.
                 </p>
               </div>
               {previewStale ? (
@@ -1977,23 +2710,61 @@ export default function NominationManualEntryPage() {
               )}
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="mt-3 grid grid-cols-2 xl:grid-cols-3 gap-2 text-xs">
               <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
-                Pages: {previewPageCount || 0}
+                <p className="text-slate-400">Pages</p>
+                <p className="text-slate-100 font-semibold">
+                  {previewEffectivePageCount}
+                </p>
               </div>
               <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
-                Current: {previewCurrentPage || 1}
+                <p className="text-slate-400">Current</p>
+                <p className="text-slate-100 font-semibold">
+                  {Math.min(
+                    previewCurrentPage || 1,
+                    previewEffectivePageCount || 1,
+                  )}
+                </p>
               </div>
               <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
-                Last saved: {lastSavedText}
+                <p className="text-slate-400">Last saved</p>
+                <p className="text-slate-100 font-semibold">{lastSavedText}</p>
               </div>
               <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2 break-all">
-                Last rendered from session:{" "}
-                {previewLastRenderedSessionId || "-"}
+                <p className="text-slate-400">Last rendered from session</p>
+                <p className="text-slate-100 font-semibold break-all">
+                  {lastRenderedFromSessionText}
+                </p>
+              </div>
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                <p className="text-slate-400">Validation</p>
+                <p className="text-slate-100 font-semibold">
+                  {validationLabel}
+                  {validationLoading && (
+                    <span className="text-slate-400 font-normal">
+                      {" "}
+                      (checking...)
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                <p className="text-slate-400">Template audit</p>
+                <p className="text-slate-100 font-semibold">
+                  {templateAuditLabel}
+                </p>
               </div>
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handlePreviewDocument}
+                disabled={previewLoading}
+                className="btn btn-secondary text-xs"
+              >
+                {previewLoading ? "Generating..." : "Preview Document"}
+              </button>
               <button
                 type="button"
                 onClick={handleRefreshPreview}
@@ -2025,7 +2796,7 @@ export default function NominationManualEntryPage() {
               <div className="mt-4 rounded-xl border border-ink-400 bg-ink-100/50 p-6 flex flex-col items-center gap-2">
                 <div className="animate-spin rounded-full h-8 w-8 border-4 border-amber-400 border-t-transparent" />
                 <p className="text-xs text-slate-300">
-                  Rendering latest saved DOCX preview...
+                  Rendering DOCX preview from current nomination data...
                 </p>
               </div>
             )}
@@ -2055,8 +2826,8 @@ export default function NominationManualEntryPage() {
             {!previewLoading && !previewError && !previewBlobUrl && (
               <div className="mt-4 rounded-xl border border-ink-400 bg-ink-100/40 p-5 text-center">
                 <p className="text-xs text-slate-400">
-                  No preview generated yet. Click Refresh Preview to render from
-                  latest saved state.
+                  No preview generated yet. Click Preview Document to render the
+                  current form data without saving.
                 </p>
               </div>
             )}
@@ -2088,6 +2859,149 @@ export default function NominationManualEntryPage() {
                   second: "2-digit",
                 })}
               </p>
+            )}
+
+            {previewSource !== "none" && (
+              <p className="text-xs text-slate-500 mt-2">
+                Preview source:{" "}
+                {previewSource === "payload" ? "Live payload" : "Saved session"}
+              </p>
+            )}
+          </div>
+
+          <div className="card border-ink-400/80">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-100">
+                  Persistence and Validation
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Save status: {persistenceStatusLabel} | Last saved:{" "}
+                  {lastSavedText}
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={strictTemplateAudit}
+                  onChange={(e) => setStrictTemplateAudit(e.target.checked)}
+                  className="h-4 w-4 rounded border-ink-400 bg-ink-100"
+                />
+                Strict template audit on export
+              </label>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                <p className="text-slate-400">Expected persisted</p>
+                <p className="text-slate-100 font-semibold">
+                  {saveExpectedCount ?? "-"}
+                </p>
+              </div>
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                <p className="text-slate-400">Saved</p>
+                <p className="text-slate-100 font-semibold">
+                  {savePersistedCount ?? "-"}
+                </p>
+              </div>
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                <p className="text-slate-400">Missing persisted fields</p>
+                <p className="text-slate-100 font-semibold">
+                  {persistedMissingFields.length}
+                </p>
+              </div>
+              <div className="rounded-lg border border-ink-400 bg-ink-100/60 px-3 py-2">
+                <p className="text-slate-400">Missing required labels</p>
+                <p className="text-slate-100 font-semibold">
+                  {effectiveMissingRequired.length}
+                </p>
+              </div>
+            </div>
+
+            {saveError && (
+              <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-100">
+                Save issue: {saveError}
+              </div>
+            )}
+
+            {sessionValidation?.error && (
+              <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                Validation issue: {sessionValidation.error}
+              </div>
+            )}
+
+            {previewMetadata?.error && (
+              <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                Preview metadata issue: {previewMetadata.error}
+              </div>
+            )}
+
+            {persistedMissingFields.length > 0 && (
+              <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">
+                  DB audit missing fields
+                </p>
+                <ul className="mt-1 text-xs text-amber-100 space-y-1 max-h-24 overflow-auto pr-1">
+                  {persistedMissingFields.slice(0, 10).map((field, idx) => (
+                    <li key={`${field}-${idx}`}>• {String(field)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {effectiveMissingRequired.length > 0 && (
+              <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">
+                  Missing required labels
+                </p>
+                <ul className="mt-1 text-xs text-amber-100 space-y-1 max-h-24 overflow-auto pr-1">
+                  {effectiveMissingRequired.slice(0, 10).map((field, idx) => (
+                    <li key={`${field}-${idx}`}>• {String(field)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {templateAuditWarnings.length > 0 && (
+              <div className="mt-3 rounded-lg border border-blue-400/40 bg-blue-500/10 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-200">
+                  Template audit warnings
+                </p>
+                <ul className="mt-1 text-xs text-blue-100 space-y-1 max-h-24 overflow-auto pr-1">
+                  {templateAuditWarnings.slice(0, 10).map((line, idx) => (
+                    <li key={`template-warning-${idx}`}>• {line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {validationDetailEntries.length > 0 && (
+              <div className="mt-3 rounded-lg border border-ink-400 bg-ink-100/60 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                  Validation details
+                </p>
+                <ul className="mt-1 text-xs text-slate-200 space-y-1 max-h-24 overflow-auto pr-1">
+                  {validationDetailEntries.map((line, idx) => (
+                    <li key={`validation-detail-${idx}`}>• {line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {(saveDiagnostics?.previewUrl ||
+              saveDiagnostics?.validationUrl) && (
+              <div className="mt-3 space-y-1">
+                {saveDiagnostics?.previewUrl && (
+                  <p className="text-xs text-slate-400 break-all">
+                    Preview URL: {saveDiagnostics.previewUrl}
+                  </p>
+                )}
+                {saveDiagnostics?.validationUrl && (
+                  <p className="text-xs text-slate-400 break-all">
+                    Validation URL: {saveDiagnostics.validationUrl}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -2256,7 +3170,8 @@ export default function NominationManualEntryPage() {
         <div className="mx-auto max-w-7xl px-4">
           <div className="bg-ink-200/95 backdrop-blur border border-ink-400 rounded-2xl shadow-xl px-4 md:px-6 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
             <p className="text-xs text-slate-500">
-              Form 2B workflow | Last saved: {lastSavedText}
+              Form 2B workflow | Last saved: {lastSavedText} | Persistence:{" "}
+              {persistenceStatusLabel} | Validation: {validationLabel}
               {previewStale ? (
                 <span className="text-amber-300 ml-2">Preview stale</span>
               ) : (
@@ -2264,6 +3179,14 @@ export default function NominationManualEntryPage() {
               )}
             </p>
             <div className="flex flex-wrap gap-2 md:gap-3">
+              <button
+                type="button"
+                onClick={handlePreviewDocument}
+                disabled={previewLoading}
+                className="btn btn-secondary text-sm"
+              >
+                {previewLoading ? "Generating..." : "Preview Document"}
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -2297,6 +3220,10 @@ export default function NominationManualEntryPage() {
     </ProtectedRoute>
   );
 }
+
+NominationManualEntryPage.getLayout = function getLayout(page) {
+  return <Layout fullWidth>{page}</Layout>;
+};
 
 // ═══════════════════════════════════════════════════════════════════
 //  Reusable sub-components

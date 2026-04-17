@@ -150,7 +150,6 @@ export default function VoterTable({
     const snapshot = buildAdjudicationSnapshot(voters, getVoterKey);
     setSavedAdjudication(snapshot);
     setDraftAdjudication(snapshot);
-    setIsEditMode(false);
   }, [voters, getVoterKey]);
 
   const hasUnsavedAdjudicationChanges = useMemo(() => {
@@ -187,61 +186,67 @@ export default function VoterTable({
     setIsEditMode(false);
   }, [savedAdjudication]);
 
-  const handleAdjudicationToggle = useCallback((key, checked) => {
-    setDraftAdjudication((prev) => ({
-      ...prev,
-      [key]: Boolean(checked),
-    }));
-  }, []);
+  const handleAdjudicationToggle = useCallback(
+    async (key, voterId, checked) => {
+      const rowKey = String(key);
+      const nextValue = Boolean(checked);
+      const previousValue = Boolean(savedAdjudication[rowKey]);
 
-  const handleSaveAdjudication = useCallback(async () => {
-    if (typeof onSaveAdjudicationChanges !== "function") {
-      toast.error("Adjudication update is not available.");
-      return;
-    }
+      setDraftAdjudication((prev) => ({
+        ...prev,
+        [rowKey]: nextValue,
+      }));
 
-    const updates = [];
-    voters.forEach((voter, index) => {
-      const key = getVoterKey(voter, index);
-      const previousValue = Boolean(savedAdjudication[key]);
-      const nextValue = Boolean(draftAdjudication[key]);
       if (previousValue === nextValue) return;
 
-      const voterId = String(voter?.id || voter?.voter_id || "").trim();
-      if (!voterId) return;
-      updates.push({ voterId, underAdjudication: nextValue });
-    });
-
-    if (!updates.length) {
-      setIsEditMode(false);
-      return;
-    }
-
-    setSavingAdjudication(true);
-    try {
-      await onSaveAdjudicationChanges(updates);
-      setSavedAdjudication(draftAdjudication);
-      setIsEditMode(false);
-      toast.success("Adjudication status updated.");
-    } catch (err) {
-      const status = Number(err?.status || 0);
-      if (status === 404 || status === 405) {
-        toast.error(
-          "Save failed: adjudication update API route is missing on backend.",
-        );
-      } else {
-        toast.error(err?.message || "Failed to update adjudication status.");
+      if (typeof onSaveAdjudicationChanges !== "function") {
+        toast.error("Adjudication update is not available.");
+        setDraftAdjudication((prev) => ({
+          ...prev,
+          [rowKey]: previousValue,
+        }));
+        return;
       }
-    } finally {
-      setSavingAdjudication(false);
-    }
-  }, [
-    draftAdjudication,
-    getVoterKey,
-    onSaveAdjudicationChanges,
-    savedAdjudication,
-    voters,
-  ]);
+
+      const normalizedVoterId = String(voterId || "").trim();
+      if (!normalizedVoterId) {
+        toast.error("Adjudication update failed: voter id missing.");
+        setDraftAdjudication((prev) => ({
+          ...prev,
+          [rowKey]: previousValue,
+        }));
+        return;
+      }
+
+      setSavingAdjudication(true);
+      try {
+        await onSaveAdjudicationChanges([
+          { voterId: normalizedVoterId, underAdjudication: nextValue },
+        ]);
+        setSavedAdjudication((prev) => ({
+          ...prev,
+          [rowKey]: nextValue,
+        }));
+      } catch (err) {
+        const status = Number(err?.status || 0);
+        if (status === 404 || status === 405) {
+          toast.error(
+            "Save failed: adjudication update API route is missing on backend.",
+          );
+        } else {
+          toast.error(err?.message || "Failed to update adjudication status.");
+        }
+
+        setDraftAdjudication((prev) => ({
+          ...prev,
+          [rowKey]: previousValue,
+        }));
+      } finally {
+        setSavingAdjudication(false);
+      }
+    },
+    [onSaveAdjudicationChanges, savedAdjudication],
+  );
 
   const handleTranslate = useCallback(async () => {
     if (translating) return;
@@ -388,10 +393,10 @@ export default function VoterTable({
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={handleSaveAdjudication}
-                disabled={savingAdjudication || !hasUnsavedAdjudicationChanges}
+                onClick={() => setIsEditMode(false)}
+                disabled={savingAdjudication}
               >
-                {savingAdjudication ? "Saving..." : "Save"}
+                Done
               </button>
             </>
           )}
@@ -475,8 +480,13 @@ export default function VoterTable({
                         <input
                           type="checkbox"
                           checked={adjudicationValue}
+                          disabled={savingAdjudication}
                           onChange={(e) =>
-                            handleAdjudicationToggle(rowKey, e.target.checked)
+                            handleAdjudicationToggle(
+                              rowKey,
+                              voter?.id || voter?.voter_id,
+                              e.target.checked,
+                            )
                           }
                           aria-label="Under adjudication"
                         />
@@ -648,8 +658,13 @@ export default function VoterTable({
                           <input
                             type="checkbox"
                             checked={adjudicationValue}
+                            disabled={savingAdjudication}
                             onChange={(e) =>
-                              handleAdjudicationToggle(rowKey, e.target.checked)
+                              handleAdjudicationToggle(
+                                rowKey,
+                                voter?.id || voter?.voter_id,
+                                e.target.checked,
+                              )
                             }
                             aria-label="Under adjudication"
                           />
