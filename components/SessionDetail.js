@@ -6,6 +6,7 @@ import VoterTable from "./VoterTable";
 import ApiEngineStatus from "./ApiEngineStatus";
 import toast from "react-hot-toast";
 import {
+  bulkSetSessionVoterAdjudicationBySerial,
   getSession,
   getSessionStatus,
   getSessionVoters,
@@ -57,6 +58,54 @@ function sanitizeFilterPayload(raw = {}) {
     output[key] = value;
   });
   return output;
+}
+
+const BULK_SERIAL_TOKEN_SPLIT = /[\s,;]+/;
+
+function normalizeBulkSerialToken(token) {
+  const text = String(token ?? "").trim();
+  if (!text || !/^\d+$/.test(text)) return "";
+  const parsed = Number.parseInt(text, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "";
+  return String(parsed);
+}
+
+function parseBulkSerialInput(rawValue) {
+  const tokens = String(rawValue ?? "")
+    .split(BULK_SERIAL_TOKEN_SPLIT)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  const validSerials = [];
+  const invalidTokens = [];
+
+  tokens.forEach((token) => {
+    const normalized = normalizeBulkSerialToken(token);
+    if (!normalized) {
+      invalidTokens.push(token);
+      return;
+    }
+    validSerials.push(normalized);
+  });
+
+  return {
+    validSerials,
+    invalidTokens,
+  };
+}
+
+function appendUniqueTokens(existing = [], additions = []) {
+  const seen = new Set(existing.map((item) => String(item)));
+  const next = [...existing];
+
+  additions.forEach((item) => {
+    const token = String(item);
+    if (!token || seen.has(token)) return;
+    seen.add(token);
+    next.push(token);
+  });
+
+  return next;
 }
 
 const statusTone = (status) => {
@@ -244,6 +293,17 @@ function canonicalizeBooth(value) {
   return match?.[1] || "";
 }
 
+function resolveSessionBoothNo(session = {}) {
+  return firstNonEmpty(
+    canonicalizeBooth(session?.booth_no),
+    canonicalizeBooth(session?.boothNo),
+    canonicalizeBooth(session?.booth_number),
+    canonicalizeBooth(session?.boothNumber),
+    canonicalizeBooth(session?.part_number),
+    canonicalizeBooth(session?.partNumber),
+  );
+}
+
 function normalizeAssemblyOptions(list) {
   const source = Array.isArray(list) ? list : [];
   const seen = new Set();
@@ -341,6 +401,13 @@ export default function SessionDetail() {
     useState(false);
   const [loadingSessionScopedParts, setLoadingSessionScopedParts] =
     useState(false);
+  const [bulkAdjState, setBulkAdjState] = useState({
+    input: "",
+    serialTags: [],
+    loading: false,
+    lastResult: null,
+  });
+  const [bulkAdjInlineMessage, setBulkAdjInlineMessage] = useState("");
 
   const {
     sessionMassSlip,
@@ -747,6 +814,193 @@ export default function SessionDetail() {
     [id],
   );
 
+  const commitBulkSerialInput = useCallback((rawValue) => {
+    const { validSerials, invalidTokens } = parseBulkSerialInput(rawValue);
+
+    setBulkAdjState((prev) => ({
+      ...prev,
+      input: "",
+      serialTags: validSerials.length
+        ? appendUniqueTokens(prev.serialTags, validSerials)
+        : prev.serialTags,
+    }));
+
+    if (invalidTokens.length) {
+      const message = `Ignored invalid SL No token${
+        invalidTokens.length > 1 ? "s" : ""
+      }: ${invalidTokens.join(", ")}`;
+      setBulkAdjInlineMessage(message);
+      toast.error(message);
+    } else {
+      setBulkAdjInlineMessage("");
+    }
+  }, []);
+
+  const handleBulkSerialInputKeyDown = useCallback(
+    (event) => {
+      const shouldCommit =
+        event.key === "Enter" ||
+        event.key === "," ||
+        event.key === ";" ||
+        event.key === " ";
+
+      if (!shouldCommit) return;
+      if (!bulkAdjState.input.trim()) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      event.preventDefault();
+      commitBulkSerialInput(bulkAdjState.input);
+    },
+    [bulkAdjState.input, commitBulkSerialInput],
+  );
+
+  const handleBulkSerialPaste = useCallback(
+    (event) => {
+      const pasted = event.clipboardData?.getData("text") || "";
+      if (!pasted.trim()) return;
+      event.preventDefault();
+      commitBulkSerialInput(pasted);
+    },
+    [commitBulkSerialInput],
+  );
+
+  const handleBulkSerialInputBlur = useCallback(() => {
+    if (!bulkAdjState.input.trim()) return;
+    commitBulkSerialInput(bulkAdjState.input);
+  }, [bulkAdjState.input, commitBulkSerialInput]);
+
+  const handleRemoveBulkSerialTag = useCallback((serial) => {
+    setBulkAdjState((prev) => ({
+      ...prev,
+      serialTags: prev.serialTags.filter((item) => item !== serial),
+    }));
+  }, []);
+
+  const handleClearBulkSerialTags = useCallback(() => {
+    setBulkAdjState((prev) => ({
+      ...prev,
+      input: "",
+      serialTags: [],
+      lastResult: null,
+    }));
+    setBulkAdjInlineMessage("");
+  }, []);
+
+  const handleBulkAdjudicationBySerial = useCallback(async () => {
+    const { validSerials: pendingSerials, invalidTokens } =
+      parseBulkSerialInput(bulkAdjState.input);
+    const serialTags = appendUniqueTokens(
+      bulkAdjState.serialTags,
+      pendingSerials,
+    );
+
+    if (invalidTokens.length) {
+      const message = `Ignored invalid SL No token${
+        invalidTokens.length > 1 ? "s" : ""
+      }: ${invalidTokens.join(", ")}`;
+      setBulkAdjInlineMessage(message);
+      toast.error(message);
+    } else {
+      setBulkAdjInlineMessage("");
+    }
+
+    if (!serialTags.length) {
+      const message = "Please add at least one valid SL No before submitting.";
+      setBulkAdjInlineMessage(message);
+      toast.error(message);
+      return;
+    }
+
+    setBulkAdjState((prev) => ({
+      ...prev,
+      input: "",
+      serialTags,
+      loading: true,
+    }));
+
+    const selectedPartNumber = String(currentFilters?.partNumber ?? "").trim();
+    const boothNo = resolveSessionBoothNo(session);
+    const payload = {
+      serialNumbers: serialTags,
+      ...(selectedPartNumber ? { partNumber: selectedPartNumber } : {}),
+      ...(boothNo ? { boothNo } : {}),
+    };
+
+    try {
+      const result = await bulkSetSessionVoterAdjudicationBySerial(id, payload);
+
+      setBulkAdjState((prev) => ({
+        ...prev,
+        serialTags,
+        loading: false,
+        lastResult: result,
+      }));
+
+      const lastQuery = lastVoterQueryRef.current;
+      fetchVoters({
+        filters: lastQuery.filters,
+        page: lastQuery.page,
+        limit: lastQuery.limit,
+        syncQuery: false,
+      });
+
+      const updatedCount = Number(result?.updatedCount || 0);
+      const alreadyCount = Number(result?.alreadyUnderAdjudicationCount || 0);
+      const ignoredCount = Array.isArray(result?.ignoredSerialNumbers)
+        ? result.ignoredSerialNumbers.length
+        : 0;
+      const invalidCount = Array.isArray(result?.invalidTokens)
+        ? result.invalidTokens.length
+        : 0;
+
+      toast.success(
+        `Bulk adjudication complete: updated ${updatedCount}, already yes ${alreadyCount}, ignored ${ignoredCount}, invalid ${invalidCount}.`,
+      );
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if (status === 400) {
+        toast.error(err?.message || "Invalid bulk adjudication request.");
+      } else if (status === 404) {
+        toast.error("Session not found.");
+      } else if (status === 503) {
+        toast.error("Database temporarily unavailable. Please retry.");
+      } else if (status) {
+        toast.error(
+          `${err?.message || "Bulk adjudication failed."} (status ${status})`,
+        );
+      } else {
+        toast.error(err?.message || "Bulk adjudication failed.");
+      }
+
+      setBulkAdjState((prev) => ({
+        ...prev,
+        serialTags,
+        loading: false,
+      }));
+    }
+  }, [
+    bulkAdjState.input,
+    bulkAdjState.serialTags,
+    currentFilters?.partNumber,
+    fetchVoters,
+    id,
+    session,
+  ]);
+
+  useEffect(() => {
+    setBulkAdjState({
+      input: "",
+      serialTags: [],
+      loading: false,
+      lastResult: null,
+    });
+    setBulkAdjInlineMessage("");
+  }, [id]);
+
   useEffect(() => {
     if (!router.isReady || initializedFromQueryRef.current) return;
 
@@ -844,6 +1098,15 @@ export default function SessionDetail() {
           Math.round((sessionMassSlip.processed / sessionMassSlip.total) * 100),
         )
       : 0;
+  const selectedPartNumber = String(currentFilters?.partNumber ?? "").trim();
+  const sessionBoothNo = resolveSessionBoothNo(session);
+  const bulkResult = bulkAdjState.lastResult;
+  const bulkIgnoredCount = Array.isArray(bulkResult?.ignoredSerialNumbers)
+    ? bulkResult.ignoredSerialNumbers.length
+    : 0;
+  const bulkInvalidCount = Array.isArray(bulkResult?.invalidTokens)
+    ? bulkResult.invalidTokens.length
+    : 0;
 
   return (
     <div className="space-y-4 text-slate-100">
@@ -1224,6 +1487,103 @@ export default function SessionDetail() {
         religionStats={religionStats}
         activeFilters={currentFilters}
       />
+
+      <div className="card space-y-3 bg-ink-900/70 border border-ink-400/40">
+        <div className="space-y-1">
+          <h3 className="text-lg font-semibold text-slate-100">
+            Bulk Under Adjudication (SL No)
+          </h3>
+          <p className="text-sm text-slate-300">
+            Enter SL numbers and press Enter
+          </p>
+          <p className="text-xs text-slate-400">
+            Scope: part {selectedPartNumber || "Any"} | booth{" "}
+            {sessionBoothNo || "Unknown"}
+          </p>
+        </div>
+
+        <div className="flex flex-col lg:flex-row gap-3">
+          <input
+            type="text"
+            value={bulkAdjState.input}
+            placeholder="Type SL No and press Enter"
+            className="flex-1 rounded-lg border border-ink-500/70 bg-ink-900/60 text-slate-100 placeholder:text-slate-400 focus:border-neon-300 focus:ring-2 focus:ring-neon-200"
+            onChange={(e) =>
+              setBulkAdjState((prev) => ({ ...prev, input: e.target.value }))
+            }
+            onKeyDown={handleBulkSerialInputKeyDown}
+            onPaste={handleBulkSerialPaste}
+            onBlur={handleBulkSerialInputBlur}
+            disabled={bulkAdjState.loading}
+            aria-label="Bulk adjudication serial number input"
+          />
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleClearBulkSerialTags}
+            disabled={
+              bulkAdjState.loading ||
+              (!bulkAdjState.serialTags.length && !bulkAdjState.input.trim())
+            }
+          >
+            Clear all
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleBulkAdjudicationBySerial}
+            disabled={bulkAdjState.loading}
+          >
+            {bulkAdjState.loading ? "Applying..." : "Make Under Adjudication"}
+          </button>
+        </div>
+
+        {bulkAdjInlineMessage && (
+          <p className="text-xs text-amber-200">{bulkAdjInlineMessage}</p>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {bulkAdjState.serialTags.length > 0 ? (
+            bulkAdjState.serialTags.map((serial) => (
+              <span
+                key={`bulk-adj-${serial}`}
+                className="inline-flex items-center gap-2 rounded-full border border-neon-300/40 bg-ink-700/70 px-3 py-1 text-sm text-slate-100"
+              >
+                <span className="font-mono">{serial}</span>
+                <button
+                  type="button"
+                  className="text-slate-300 hover:text-rose-200"
+                  onClick={() => handleRemoveBulkSerialTag(serial)}
+                  disabled={bulkAdjState.loading}
+                  aria-label={`Remove SL No ${serial}`}
+                >
+                  x
+                </button>
+              </span>
+            ))
+          ) : (
+            <span className="text-sm text-slate-400">
+              No SL numbers added yet.
+            </span>
+          )}
+        </div>
+
+        {bulkResult && (
+          <div className="rounded-lg border border-emerald-700/50 bg-emerald-900/20 p-3 text-sm text-emerald-100">
+            <p className="font-semibold">Last bulk result</p>
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs sm:text-sm">
+              <span>Updated: {Number(bulkResult?.updatedCount || 0)}</span>
+              <span>
+                Already Yes:{" "}
+                {Number(bulkResult?.alreadyUnderAdjudicationCount || 0)}
+              </span>
+              <span>Ignored: {bulkIgnoredCount}</span>
+              <span>Invalid: {bulkInvalidCount}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
       <VoterTable
         voters={voters}
         loading={loadingVoters}
