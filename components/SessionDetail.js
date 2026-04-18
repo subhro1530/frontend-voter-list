@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import {
   bulkSetSessionVoterAdjudicationBySerial,
   getSession,
+  getSessionNavigation,
   getSessionStatus,
   getSessionVoters,
   updateSessionVoterAdjudication,
@@ -28,6 +29,7 @@ import {
   extractDispatchTier,
   formatAutomaticRetryRounds,
 } from "../lib/engineStatusMapper";
+import AdditionalVotersUploadModal from "./AdditionalVotersUploadModal";
 
 const VOTER_FILTER_KEYS = [
   "voterId",
@@ -362,11 +364,134 @@ function normalizePartOptions(list) {
   );
 }
 
+function getSingleQueryValue(value) {
+  if (Array.isArray(value)) return String(value[0] || "");
+  return String(value || "");
+}
+
+function normalizeNavigationOrder(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return normalized === "desc" ? "desc" : "asc";
+}
+
+function normalizeSessionNavItem(item) {
+  if (!item || typeof item !== "object") return null;
+  const id = firstNonEmpty(item?.id, item?.sessionId, item?.session_id);
+  if (!id) return null;
+
+  return {
+    id,
+    originalFilename: firstNonEmpty(
+      item?.originalFilename,
+      item?.original_filename,
+      item?.filename,
+    ),
+    status: firstNonEmpty(item?.status, item?.state),
+    boothNo: firstNonEmpty(
+      item?.boothNo,
+      item?.booth_no,
+      item?.partNo,
+      item?.part_number,
+    ),
+    boothName: firstNonEmpty(item?.boothName, item?.booth_name),
+    assemblyName: firstNonEmpty(
+      item?.assemblyName,
+      item?.assembly_name,
+      item?.assembly,
+      item?.constituency,
+    ),
+    created_at: item?.created_at ?? item?.createdAt ?? null,
+    updated_at: item?.updated_at ?? item?.updatedAt ?? null,
+  };
+}
+
+function createNavigationState(order = "asc") {
+  return {
+    order: normalizeNavigationOrder(order),
+    totalSessions: 0,
+    currentIndex: 0,
+    currentSession: null,
+    previousSession: null,
+    nextSession: null,
+    isLoading: true,
+    error: null,
+  };
+}
+
+function normalizeSessionNavigationPayload(
+  payload,
+  fallbackOrder,
+  fallbackCurrent,
+) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  return {
+    order: normalizeNavigationOrder(source?.order || fallbackOrder),
+    totalSessions: Number(source?.totalSessions ?? source?.total_sessions ?? 0),
+    currentIndex: Number(source?.currentIndex ?? source?.current_index ?? 0),
+    currentSession:
+      normalizeSessionNavItem(
+        source?.currentSession ?? source?.current_session,
+      ) || fallbackCurrent,
+    previousSession: normalizeSessionNavItem(
+      source?.previousSession ?? source?.previous_session,
+    ),
+    nextSession: normalizeSessionNavItem(
+      source?.nextSession ?? source?.next_session,
+    ),
+  };
+}
+
+function extractSessionNavigationFromResponse(
+  response,
+  normalizedSession,
+  fallbackOrder,
+) {
+  const fallbackCurrent =
+    normalizeSessionNavItem(normalizedSession) ||
+    normalizeSessionNavItem({
+      ...(normalizedSession || {}),
+      id: normalizedSession?.id,
+    });
+
+  const candidates = [
+    response?.navigation,
+    response?.sessionNavigation,
+    response?.data?.navigation,
+    response?.data?.sessionNavigation,
+    response?.session?.navigation,
+    response?.session?.sessionNavigation,
+    normalizedSession?.navigation,
+    normalizedSession?.sessionNavigation,
+  ];
+
+  const payload = candidates.find(
+    (candidate) => candidate && typeof candidate === "object",
+  );
+
+  return normalizeSessionNavigationPayload(
+    payload,
+    fallbackOrder,
+    fallbackCurrent,
+  );
+}
+
 export default function SessionDetail() {
   const router = useRouter();
   const { isAdmin } = useAuth();
   const { id } = router.query;
+  const sessionId = Array.isArray(id) ? id[0] : id;
+  const queryOrder = getSingleQueryValue(router.query?.order);
+  const querySortOrder = getSingleQueryValue(router.query?.sortOrder);
+  const queryBoothOrder = getSingleQueryValue(router.query?.boothOrder);
+  const navOrder = normalizeNavigationOrder(
+    queryOrder || querySortOrder || queryBoothOrder || "asc",
+  );
   const [session, setSession] = useState(null);
+  const [navigationState, setNavigationState] = useState(() =>
+    createNavigationState(navOrder),
+  );
   const [voters, setVoters] = useState([]);
   const [loadingSession, setLoadingSession] = useState(true);
   const [loadingVoters, setLoadingVoters] = useState(true);
@@ -389,6 +514,7 @@ export default function SessionDetail() {
   });
   const [actionLoading, setActionLoading] = useState("");
   const [renameModal, setRenameModal] = useState(false);
+  const [additionalUploadOpen, setAdditionalUploadOpen] = useState(false);
   const [dispatchMode, setDispatchMode] = useState("auto");
   const [isTabVisible, setIsTabVisible] = useState(() => {
     if (typeof document === "undefined") return true;
@@ -416,7 +542,7 @@ export default function SessionDetail() {
     downloadSessionMassSlip,
     isJobActive: isSessionMassJobActive,
   } = useSessionMassVoterSlipJob({
-    sessionId: id,
+    sessionId,
     session,
     onWarning: (message) => toast(message, { icon: "⚠️" }),
     onError: (message) => toast.error(message),
@@ -424,15 +550,16 @@ export default function SessionDetail() {
   });
 
   const fetchSession = (signal, { silent } = {}) => {
-    if (!id) return;
+    if (!sessionId) return;
     if (!silent) setLoadingSession(true);
     setErrorSession("");
-    getSession(id, signal)
+    getSession(sessionId, { order: navOrder }, signal)
       .then((res) => {
         const data = res.session || res;
         // Normalize field names from different backend versions
         const normalizedSession = {
           ...data,
+          id: data.id ?? data.session_id ?? sessionId,
           page_count:
             data.page_count ??
             data.pageCount ??
@@ -455,9 +582,41 @@ export default function SessionDetail() {
             null,
         };
         setSession(normalizedSession);
+
+        const normalizedNavigation = extractSessionNavigationFromResponse(
+          res,
+          normalizedSession,
+          navOrder,
+        );
+
+        setNavigationState((prev) => ({
+          ...prev,
+          ...normalizedNavigation,
+          order: navOrder,
+          isLoading: false,
+          error: null,
+        }));
       })
       .catch((err) => {
         if (err.name === "AbortError") return;
+
+        const status = Number(err?.status || 0);
+        if (status === 404) {
+          setErrorSession("Session not found.");
+          setNavigationState((prev) => ({
+            ...prev,
+            order: navOrder,
+            totalSessions: 0,
+            currentIndex: 0,
+            currentSession: null,
+            previousSession: null,
+            nextSession: null,
+            isLoading: false,
+            error: "Session not found.",
+          }));
+          return;
+        }
+
         setErrorSession(err.message || "Failed to load session");
       })
       .finally(() => {
@@ -466,21 +625,23 @@ export default function SessionDetail() {
   };
 
   const refreshLinkedElectionData = useCallback(async () => {
-    if (!id) return;
+    if (!sessionId) return;
     try {
-      await electionResultsAPI.getLinkedElectionResultsFromVoterSession(id);
+      await electionResultsAPI.getLinkedElectionResultsFromVoterSession(
+        sessionId,
+      );
     } catch {
       // Keep silent; linking may not exist for all sessions.
     }
-  }, [id]);
+  }, [sessionId]);
 
   const loadSessionScopedAssemblies = useCallback(
     (signal) => {
-      if (!id) return Promise.resolve([]);
+      if (!sessionId) return Promise.resolve([]);
       setLoadingSessionScopedAssemblies(true);
 
       return userAPI
-        .getAssemblies({ signal, sessionId: id })
+        .getAssemblies({ signal, sessionId })
         .then((res) => {
           const normalized = normalizeAssemblyOptions(
             res?.assemblies || res || [],
@@ -496,20 +657,20 @@ export default function SessionDetail() {
         })
         .finally(() => setLoadingSessionScopedAssemblies(false));
     },
-    [id],
+    [sessionId],
   );
 
   const loadSessionScopedParts = useCallback(
     (assembly, signal) => {
       const assemblyValue = String(assembly || "").trim();
-      if (!id || !assemblyValue) {
+      if (!sessionId || !assemblyValue) {
         setSessionScopedParts([]);
         return Promise.resolve([]);
       }
 
       setLoadingSessionScopedParts(true);
       return userAPI
-        .getParts(assemblyValue, { signal, sessionId: id })
+        .getParts(assemblyValue, { signal, sessionId })
         .then((res) => {
           const normalized = normalizePartOptions(res?.parts || res || []);
           setSessionScopedParts(normalized);
@@ -523,15 +684,15 @@ export default function SessionDetail() {
         })
         .finally(() => setLoadingSessionScopedParts(false));
     },
-    [id],
+    [sessionId],
   );
 
   const fetchStatus = (signal) => {
-    if (!id) return;
+    if (!sessionId) return;
     if (statusController.current) statusController.current.abort();
     const controller = signal ? { signal } : new AbortController();
     if (!signal) statusController.current = controller;
-    getSessionStatus(id, controller.signal)
+    getSessionStatus(sessionId, controller.signal)
       .then((payload) => {
         const normalized = normalizeStatus(payload);
         setStatusInfo(normalized);
@@ -545,8 +706,8 @@ export default function SessionDetail() {
   };
 
   const fetchReligionStats = (signal) => {
-    if (!id) return;
-    getReligionStats(id, signal)
+    if (!sessionId) return;
+    getReligionStats(sessionId, signal)
       .then((data) => {
         setReligionStats(data);
       })
@@ -555,6 +716,79 @@ export default function SessionDetail() {
         // Silent fail for religion stats
       });
   };
+
+  const fetchNavigation = useCallback(
+    (signal, { silent = false } = {}) => {
+      if (!sessionId) return;
+
+      if (!silent) {
+        setNavigationState((prev) => ({
+          ...prev,
+          order: navOrder,
+          isLoading: true,
+          error: null,
+        }));
+      }
+
+      const fallbackCurrent = normalizeSessionNavItem(
+        session || { id: sessionId },
+      );
+
+      getSessionNavigation(sessionId, { order: navOrder }, signal)
+        .then((response) => {
+          const payload =
+            response?.navigation ||
+            response?.data?.navigation ||
+            response?.result?.navigation ||
+            response;
+
+          const normalized = normalizeSessionNavigationPayload(
+            payload,
+            navOrder,
+            fallbackCurrent,
+          );
+
+          setNavigationState((prev) => ({
+            ...prev,
+            ...normalized,
+            order: navOrder,
+            isLoading: false,
+            error: null,
+          }));
+        })
+        .catch((err) => {
+          if (err?.name === "AbortError") return;
+
+          const status = Number(err?.status || 0);
+          if (status === 404) {
+            setNavigationState((prev) => ({
+              ...prev,
+              order: navOrder,
+              totalSessions: 0,
+              currentIndex: 0,
+              currentSession: null,
+              previousSession: null,
+              nextSession: null,
+              isLoading: false,
+              error: "Session not found.",
+            }));
+            setErrorSession((prev) => prev || "Session not found.");
+            return;
+          }
+
+          const message =
+            err?.message || "Failed to refresh session navigation.";
+          setNavigationState((prev) => ({
+            ...prev,
+            order: navOrder,
+            isLoading: false,
+            error: message,
+          }));
+          toast.error(message);
+        });
+    },
+    [navOrder, session, sessionId],
+  );
 
   useEffect(() => {
     setDispatchMode(readStoredDispatchMode());
@@ -571,6 +805,36 @@ export default function SessionDetail() {
     return () =>
       document.removeEventListener("visibilitychange", onVisibilityChange);
   }, []);
+
+  useEffect(() => {
+    if (!router.isReady) return;
+
+    const hasAlias = Boolean(querySortOrder || queryBoothOrder);
+    if (queryOrder === navOrder && !hasAlias) return;
+
+    const nextQuery = {
+      ...router.query,
+      order: navOrder,
+    };
+    delete nextQuery.sortOrder;
+    delete nextQuery.boothOrder;
+
+    router.replace(
+      {
+        pathname: router.pathname,
+        query: nextQuery,
+      },
+      undefined,
+      { shallow: true },
+    );
+  }, [
+    navOrder,
+    queryBoothOrder,
+    queryOrder,
+    querySortOrder,
+    router,
+    router.isReady,
+  ]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -594,7 +858,35 @@ export default function SessionDetail() {
       if (statusController.current) statusController.current.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const controller = new AbortController();
+    fetchNavigation(controller.signal);
+    return () => controller.abort();
+  }, [fetchNavigation, navOrder, sessionId]);
+
+  useEffect(() => {
+    const previousId = navigationState.previousSession?.id;
+    const nextId = navigationState.nextSession?.id;
+    const orderForPrefetch = normalizeNavigationOrder(
+      navigationState.order || navOrder,
+    );
+
+    [previousId, nextId].filter(Boolean).forEach((targetId) => {
+      const href = `/sessions/${encodeURIComponent(targetId)}?order=${orderForPrefetch}`;
+      router.prefetch(href).catch(() => {
+        // Prefetch failure is non-blocking.
+      });
+    });
+  }, [
+    navigationState.nextSession?.id,
+    navigationState.order,
+    navigationState.previousSession?.id,
+    navOrder,
+    router,
+  ]);
 
   useEffect(() => {
     const assemblyFromSession = firstNonEmpty(
@@ -616,7 +908,7 @@ export default function SessionDetail() {
 
   // Auto-polling for live status updates (every 2 seconds while visible)
   useEffect(() => {
-    if (!id) return;
+    if (!sessionId) return;
     if (!isTabVisible) return;
 
     // Only poll if session is still processing
@@ -644,7 +936,7 @@ export default function SessionDetail() {
     }, 2000); // Poll every 2 seconds
 
     return () => clearInterval(pollInterval);
-  }, [id, isTabVisible, statusInfo?.statusText, session?.status]);
+  }, [isTabVisible, session?.status, sessionId, statusInfo?.statusText]);
 
   const syncVoterQueryState = useCallback(
     (page, limit) => {
@@ -672,7 +964,7 @@ export default function SessionDetail() {
       limit = voterPagination.limit,
       syncQuery = true,
     } = {}) => {
-      if (!id) return;
+      if (!sessionId) return;
       if (voterController.current) voterController.current.abort();
 
       const controller = new AbortController();
@@ -699,7 +991,7 @@ export default function SessionDetail() {
       setCurrentFilters(safeFilters);
       if (syncQuery) syncVoterQueryState(safePage, safeLimit);
 
-      getSessionVoters(id, query, controller.signal)
+      getSessionVoters(sessionId, query, controller.signal)
         .then((res) => {
           if (requestId !== voterRequestSeqRef.current) return;
 
@@ -740,7 +1032,7 @@ export default function SessionDetail() {
     },
     [
       currentFilters,
-      id,
+      sessionId,
       router,
       syncVoterQueryState,
       voterPagination.limit,
@@ -793,7 +1085,7 @@ export default function SessionDetail() {
 
       if (!normalized.length) return;
 
-      await updateSessionVoterAdjudication(id, normalized);
+      await updateSessionVoterAdjudication(sessionId, normalized);
 
       const updateMap = new Map(
         normalized.map((item) => [item.voterId, item.underAdjudication]),
@@ -811,7 +1103,7 @@ export default function SessionDetail() {
         }),
       );
     },
-    [id],
+    [sessionId],
   );
 
   const commitBulkSerialInput = useCallback((rawValue) => {
@@ -931,7 +1223,10 @@ export default function SessionDetail() {
     };
 
     try {
-      const result = await bulkSetSessionVoterAdjudicationBySerial(id, payload);
+      const result = await bulkSetSessionVoterAdjudicationBySerial(
+        sessionId,
+        payload,
+      );
 
       setBulkAdjState((prev) => ({
         ...prev,
@@ -987,7 +1282,7 @@ export default function SessionDetail() {
     bulkAdjState.serialTags,
     currentFilters?.partNumber,
     fetchVoters,
-    id,
+    sessionId,
     session,
   ]);
 
@@ -999,7 +1294,7 @@ export default function SessionDetail() {
       lastResult: null,
     });
     setBulkAdjInlineMessage("");
-  }, [id]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!router.isReady || initializedFromQueryRef.current) return;
@@ -1023,7 +1318,7 @@ export default function SessionDetail() {
   const handleStop = async () => {
     setActionLoading("stop");
     try {
-      await stopSession(id);
+      await stopSession(sessionId);
       fetchSession();
       fetchStatus();
     } catch (err) {
@@ -1036,7 +1331,7 @@ export default function SessionDetail() {
   const handleResume = async () => {
     setActionLoading("resume");
     try {
-      const response = await resumeSession(id, dispatchMode);
+      const response = await resumeSession(sessionId, dispatchMode);
       const rounds = extractAutomaticRetryRounds(response);
       const retryText = formatAutomaticRetryRounds(rounds);
       toast.success(
@@ -1053,13 +1348,66 @@ export default function SessionDetail() {
 
   const handleRename = async (newName) => {
     try {
-      await renameSession(id, newName);
+      await renameSession(sessionId, newName);
       setRenameModal(false);
       fetchSession();
     } catch (err) {
       setErrorSession(err.message || "Failed to rename session");
     }
   };
+
+  const handleNavigationOrderChange = useCallback(
+    (nextOrder) => {
+      const normalizedNext = normalizeNavigationOrder(nextOrder);
+      if (normalizedNext === navOrder && queryOrder === normalizedNext) return;
+
+      const nextQuery = {
+        ...router.query,
+        order: normalizedNext,
+      };
+      delete nextQuery.sortOrder;
+      delete nextQuery.boothOrder;
+
+      router.replace(
+        {
+          pathname: router.pathname,
+          query: nextQuery,
+        },
+        undefined,
+        { shallow: true },
+      );
+    },
+    [navOrder, queryOrder, router],
+  );
+
+  const handleNavigateAdjacentSession = useCallback(
+    (direction) => {
+      const target =
+        direction === "previous"
+          ? navigationState.previousSession
+          : navigationState.nextSession;
+
+      if (!target?.id) return;
+
+      const orderForRoute = normalizeNavigationOrder(
+        navigationState.order || navOrder,
+      );
+      router.push(
+        `/sessions/${encodeURIComponent(target.id)}?order=${orderForRoute}`,
+      );
+    },
+    [
+      navOrder,
+      navigationState.nextSession,
+      navigationState.order,
+      navigationState.previousSession,
+      router,
+    ],
+  );
+
+  const retryNavigationFetch = useCallback(() => {
+    fetchNavigation();
+  }, [fetchNavigation]);
 
   const currentStatus = (
     statusInfo?.statusText ||
@@ -1101,6 +1449,27 @@ export default function SessionDetail() {
 
   const selectedPartNumber = String(currentFilters?.partNumber ?? "").trim();
   const sessionBoothNo = resolveSessionBoothNo(session);
+  const navigationOrder = normalizeNavigationOrder(
+    navigationState.order || navOrder,
+  );
+  const previousTarget = navigationState.previousSession;
+  const nextTarget = navigationState.nextSession;
+  const previousDisabled = !previousTarget?.id;
+  const nextDisabled = !nextTarget?.id;
+  const centerCurrentBooth = firstNonEmpty(
+    navigationState.currentSession?.boothNo,
+    sessionBoothNo,
+  );
+  const centerLabel =
+    navigationState.totalSessions > 0 && navigationState.currentIndex > 0
+      ? `Booth ${navigationState.currentIndex} of ${navigationState.totalSessions}`
+      : "Booth navigation";
+  const previousLabel = previousTarget?.boothNo
+    ? `Booth ${previousTarget.boothNo}`
+    : "Previous Session";
+  const nextLabel = nextTarget?.boothNo
+    ? `Booth ${nextTarget.boothNo}`
+    : "Next Session";
   const bulkResult = bulkAdjState.lastResult;
   const bulkIgnoredCount = Array.isArray(bulkResult?.ignoredSerialNumbers)
     ? bulkResult.ignoredSerialNumbers.length
@@ -1121,7 +1490,7 @@ export default function SessionDetail() {
           </Link>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-display font-semibold">
-              Session {id}
+              Session {sessionId || id}
             </h1>
             <button
               onClick={() => setRenameModal(true)}
@@ -1145,11 +1514,18 @@ export default function SessionDetail() {
             <button
               className="btn btn-secondary"
               onClick={() => setFixMetadataOpen(true)}
-              disabled={!id}
+              disabled={!sessionId}
             >
               Fix Session Metadata
             </button>
           )}
+          <button
+            className="btn btn-secondary"
+            onClick={() => setAdditionalUploadOpen(true)}
+            disabled={!sessionId}
+          >
+            Upload Additional Voters
+          </button>
           {/* Stop button */}
           {canStop && (
             <button
@@ -1177,6 +1553,7 @@ export default function SessionDetail() {
             onClick={() => {
               fetchSession();
               fetchStatus();
+              fetchNavigation();
             }}
             disabled={loadingSession}
           >
@@ -1195,6 +1572,93 @@ export default function SessionDetail() {
         </div>
       </div>
 
+      <div className="card border border-ink-400/40 bg-ink-900/70 space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => handleNavigateAdjacentSession("previous")}
+            disabled={previousDisabled}
+            aria-label={
+              previousDisabled
+                ? "Previous session unavailable"
+                : `Go to previous ${previousLabel}`
+            }
+          >
+            ← {previousLabel}
+          </button>
+
+          <div className="text-center space-y-1">
+            <p className="text-sm font-semibold text-slate-100">
+              {centerLabel}
+            </p>
+            <p className="text-xs text-slate-300">
+              {centerCurrentBooth
+                ? `Current Booth ${centerCurrentBooth}`
+                : "Current booth unavailable"}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => handleNavigateAdjacentSession("next")}
+            disabled={nextDisabled}
+            aria-label={
+              nextDisabled
+                ? "Next session unavailable"
+                : `Go to next ${nextLabel}`
+            }
+          >
+            {nextLabel} →
+          </button>
+        </div>
+
+        <div className="flex items-center flex-wrap gap-2 text-xs text-slate-300">
+          <span className="uppercase tracking-wide text-slate-400">Order</span>
+          <button
+            type="button"
+            className={
+              navigationOrder === "asc"
+                ? "btn btn-primary"
+                : "btn btn-secondary"
+            }
+            onClick={() => handleNavigationOrderChange("asc")}
+            aria-pressed={navigationOrder === "asc"}
+          >
+            Asc
+          </button>
+          <button
+            type="button"
+            className={
+              navigationOrder === "desc"
+                ? "btn btn-primary"
+                : "btn btn-secondary"
+            }
+            onClick={() => handleNavigationOrderChange("desc")}
+            aria-pressed={navigationOrder === "desc"}
+          >
+            Desc
+          </button>
+          {navigationState.isLoading && (
+            <span className="text-slate-400">Refreshing navigation...</span>
+          )}
+          {navigationState.error && (
+            <>
+              <span className="text-amber-200">{navigationState.error}</span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={retryNavigationFetch}
+                disabled={navigationState.isLoading}
+              >
+                Retry Nav
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* Rename Modal */}
       {renameModal && session && (
         <RenameModal
@@ -1204,9 +1668,32 @@ export default function SessionDetail() {
         />
       )}
 
+      {additionalUploadOpen && (
+        <AdditionalVotersUploadModal
+          sessionId={sessionId}
+          sessionLabel={session?.original_filename}
+          onClose={() => setAdditionalUploadOpen(false)}
+          onSuccess={async () => {
+            const lastQuery = lastVoterQueryRef.current;
+
+            await Promise.allSettled([
+              fetchSession(undefined, { silent: true }),
+              Promise.resolve(fetchStatus()),
+            ]);
+
+            fetchVoters({
+              filters: lastQuery.filters,
+              page: lastQuery.page,
+              limit: lastQuery.limit,
+              syncQuery: false,
+            });
+          }}
+        />
+      )}
+
       {fixMetadataOpen && session && isAdmin && (
         <FixSessionMetadataModal
-          sessionId={id}
+          sessionId={sessionId}
           session={session}
           assemblies={sessionScopedAssemblies}
           parts={sessionScopedParts}
@@ -1332,7 +1819,7 @@ export default function SessionDetail() {
           </div>
           <div className="space-y-3">
             <ApiEngineStatus
-              sessionId={id}
+              sessionId={sessionId}
               sessionStatus={statusInfo?.statusText || session?.status}
               pollInterval={4000}
               dispatchMode={dispatchMode}

@@ -18,6 +18,7 @@ import {
 } from "../lib/engineStatusMapper";
 import DispatchModeSelector from "./DispatchModeSelector";
 import { readStoredDispatchMode } from "../lib/dispatchMode";
+import AdditionalVotersUploadModal from "./AdditionalVotersUploadModal";
 
 const SKELETON_COUNT = 8;
 const SORT_VALUE = "createdAt:desc";
@@ -137,6 +138,7 @@ export default function SessionList() {
   const [linkedYear, setLinkedYear] = useState("");
   const [dispatchMode, setDispatchMode] = useState("auto");
   const [boothSortOrder, setBoothSortOrder] = useState("none");
+  const [additionalUploadTarget, setAdditionalUploadTarget] = useState(null);
   const [isTabVisible, setIsTabVisible] = useState(() => {
     if (typeof document === "undefined") return true;
     return document.visibilityState !== "hidden";
@@ -325,6 +327,11 @@ export default function SessionList() {
     pageCacheRef.current.delete(cacheKey);
     load({ force: true });
   }, [effectiveFilters, load]);
+
+  const handleAdditionalUploadSuccess = useCallback(() => {
+    pageCacheRef.current.clear();
+    refreshCurrentPage();
+  }, [refreshCurrentPage]);
 
   useEffect(() => {
     const cleanup = load();
@@ -883,6 +890,17 @@ export default function SessionList() {
                 <Link className="btn btn-primary" href={`/sessions/${s.id}`}>
                   View
                 </Link>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() =>
+                    setAdditionalUploadTarget({
+                      id: s.id,
+                      name: s.original_filename || "",
+                    })
+                  }
+                >
+                  Upload Additional Voters
+                </button>
                 <Link
                   className="btn btn-secondary"
                   href={`/sessions/${s.id}?openMass=1`}
@@ -934,6 +952,15 @@ export default function SessionList() {
           session={renameModal}
           onClose={() => setRenameModal(null)}
           onRename={handleRename}
+        />
+      )}
+
+      {additionalUploadTarget && (
+        <AdditionalVotersUploadModal
+          sessionId={additionalUploadTarget.id}
+          sessionLabel={additionalUploadTarget.name}
+          onClose={() => setAdditionalUploadTarget(null)}
+          onSuccess={handleAdditionalUploadSuccess}
         />
       )}
 
