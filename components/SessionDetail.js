@@ -414,7 +414,7 @@ export default function SessionDetail() {
     startSessionMassSlip,
     retrySessionMassSlip,
     downloadSessionMassSlip,
-    isJobActive,
+    isJobActive: isSessionMassJobActive,
   } = useSessionMassVoterSlipJob({
     sessionId: id,
     session,
@@ -1098,6 +1098,7 @@ export default function SessionDetail() {
           Math.round((sessionMassSlip.processed / sessionMassSlip.total) * 100),
         )
       : 0;
+
   const selectedPartNumber = String(currentFilters?.partNumber ?? "").trim();
   const sessionBoothNo = resolveSessionBoothNo(session);
   const bulkResult = bulkAdjState.lastResult;
@@ -1365,7 +1366,8 @@ export default function SessionDetail() {
               Session ID: {sessionMassSlip.sessionId || id || "—"}
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              Canonical booth: {sessionMassSlip.boothNo || "Not resolved"}
+              Part No source of truth (session booth context):{" "}
+              {sessionMassSlip.boothNo || "Not resolved"}
               {sessionMassSlip.boothSource
                 ? ` (${sessionMassSlip.boothSource})`
                 : ""}
@@ -1380,7 +1382,7 @@ export default function SessionDetail() {
             type="button"
             className="btn btn-primary"
             onClick={startSessionMassSlip}
-            disabled={sessionMassSlip.isStarting || isJobActive}
+            disabled={sessionMassSlip.isStarting || isSessionMassJobActive}
           >
             {sessionMassSlip.isStarting
               ? "Starting..."
@@ -1461,7 +1463,9 @@ export default function SessionDetail() {
                   type="button"
                   className="btn btn-secondary"
                   onClick={retrySessionMassSlip}
-                  disabled={sessionMassSlip.isStarting || isJobActive}
+                  disabled={
+                    sessionMassSlip.isStarting || isSessionMassJobActive
+                  }
                 >
                   Restart with Previous Filters
                 </button>
