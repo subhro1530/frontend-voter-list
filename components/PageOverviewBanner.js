@@ -32,6 +32,12 @@ const PAGE_OVERVIEW_CONFIG = {
       "Track processing voter lists, inspect extracted records, and verify output quality for each batch.",
     image: "/page-overviews/sessions/index-overview.png",
   },
+  "/sessions/auto-download": {
+    title: "Sequential Booth Auto Download",
+    summary:
+      "Generate and download booth voter slips sequentially with pause, resume, and retry controls.",
+    image: "/page-overviews/sessions/index-overview.png",
+  },
   "/profile": {
     title: "User Profile",
     summary:

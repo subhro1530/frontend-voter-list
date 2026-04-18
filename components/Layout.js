@@ -128,6 +128,12 @@ export default function Layout({ children, fullWidth = false }) {
                           {t("Sessions")}
                         </NavLink>
                         <NavLink
+                          href="/sessions/auto-download"
+                          tooltip="Run sequential booth range voter-slip downloads"
+                        >
+                          {t("Auto Download")}
+                        </NavLink>
+                        <NavLink
                           href="/upload"
                           tooltip="Upload a new voter list PDF"
                         >
@@ -501,6 +507,9 @@ export default function Layout({ children, fullWidth = false }) {
                       </MobileNavLink>
                       <MobileNavLink href="/sessions">
                         {t("Sessions")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/sessions/auto-download">
+                        {t("Auto Download")}
                       </MobileNavLink>
                       <MobileNavLink href="/upload">
                         {t("Upload")}
