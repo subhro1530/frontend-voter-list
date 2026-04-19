@@ -2,7 +2,10 @@ import { useCallback, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { getSessions } from "../lib/api";
 import useBoothRangeZipJob, {
-  NEXT_BOOTH_DELAY_MS,
+  MAX_PARALLEL_BOOTHS,
+  POLL_INTERVAL_MS,
+  RETRY_LIMIT,
+  START_STAGGER_MS,
   normalizeBoothRangeInput,
 } from "../lib/useBoothRangeZipJob";
 
@@ -87,35 +90,53 @@ export default function SequentialBoothAutoDownloadPanel() {
     : [];
   const boothRangeTotals = boothRangeState.totals || {
     total: 0,
+    processing: 0,
     downloaded: 0,
     failed: 0,
     skipped: 0,
+    pending: 0,
   };
 
   const failedBoothsCount = boothRangeItems.filter(
     (item) => item.status === "failed",
   ).length;
   const currentBoothLabel = boothRangeState.currentBooth || "-";
-  const cooldownLabel = formatCountdown(boothRangeState.cooldownMsRemaining);
-  const nextBoothEtaLabel =
-    boothRangeState.cooldownMsRemaining > 0 ? cooldownLabel : "Ready";
+  const dispatchHoldLabel = formatCountdown(
+    boothRangeState.cooldownMsRemaining,
+  );
+  const dispatchHoldEtaLabel =
+    boothRangeState.cooldownMsRemaining > 0 ? dispatchHoldLabel : "Ready";
   const runnerStatusLabel = boothRangeState.isRunning
-    ? boothRangeState.isPaused
-      ? "Paused"
-      : "Running"
+    ? boothRangeState.isStopping
+      ? "Stopping"
+      : boothRangeState.isPaused
+        ? "Paused"
+        : "Running"
     : "Idle";
   const runnerStatusClass = boothRangeState.isRunning
-    ? boothRangeState.isPaused
-      ? "bg-amber-900/50 text-amber-100 border-amber-700/60"
-      : "bg-sky-900/50 text-sky-100 border-sky-700/60"
+    ? boothRangeState.isStopping
+      ? "bg-rose-900/50 text-rose-100 border-rose-700/60"
+      : boothRangeState.isPaused
+        ? "bg-amber-900/50 text-amber-100 border-amber-700/60"
+        : "bg-sky-900/50 text-sky-100 border-sky-700/60"
     : "bg-slate-700/60 text-slate-200 border-slate-500/60";
 
   const headerMeta = useMemo(
     () => ({
-      delayMs: NEXT_BOOTH_DELAY_MS,
+      configuredMaxParallel:
+        boothRangeState.configuredMaxParallel || MAX_PARALLEL_BOOTHS,
+      activeDispatchParallel:
+        boothRangeState.dispatchParallelLimit || MAX_PARALLEL_BOOTHS,
+      pollMs: POLL_INTERVAL_MS,
+      retryLimit: RETRY_LIMIT,
+      startStaggerMs: START_STAGGER_MS,
       currentBooth: currentBoothLabel,
     }),
-    [currentBoothLabel],
+    [
+      boothRangeState.configuredMaxParallel,
+      boothRangeState.dispatchParallelLimit,
+      currentBoothLabel,
+    ],
   );
 
   return (
@@ -123,15 +144,17 @@ export default function SequentialBoothAutoDownloadPanel() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold text-slate-100">
-            Sequential Booth Range Auto Download
+            Parallel Booth Range Auto Download
           </h3>
           <p className="text-sm text-slate-300">
-            Generates one booth PDF at a time, downloads immediately, then waits
-            before next booth.
+            Runs booth jobs in capped parallel slots with adaptive backpressure,
+            and downloads each booth immediately after completion.
           </p>
           <p className="text-xs text-slate-400 mt-1">
-            Concurrency: 1 (strict sequence). Next booth delay:{" "}
-            {headerMeta.delayMs} ms.
+            Dispatch concurrency: {headerMeta.activeDispatchParallel}/
+            {headerMeta.configuredMaxParallel}. Start stagger:{" "}
+            {headerMeta.startStaggerMs} ms. Poll: {headerMeta.pollMs} ms. Retry
+            limit: {headerMeta.retryLimit}.
           </p>
           <p className="text-xs text-slate-400 mt-1">
             Part No source of truth remains booth-context driven. Current booth:{" "}
@@ -194,10 +217,16 @@ export default function SequentialBoothAutoDownloadPanel() {
         </div>
       </form>
 
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 text-sm text-slate-200">
+      <div className="grid grid-cols-2 lg:grid-cols-8 gap-3 text-sm text-slate-200">
         <div className="rounded-lg border border-ink-500/40 bg-ink-900/50 p-3">
           <div className="text-slate-400 text-xs">Total booths</div>
           <div className="font-semibold mt-1">{boothRangeTotals.total}</div>
+        </div>
+        <div className="rounded-lg border border-ink-500/40 bg-ink-900/50 p-3">
+          <div className="text-slate-400 text-xs">Processing</div>
+          <div className="font-semibold mt-1">
+            {boothRangeTotals.processing}
+          </div>
         </div>
         <div className="rounded-lg border border-ink-500/40 bg-ink-900/50 p-3">
           <div className="text-slate-400 text-xs">Downloaded</div>
@@ -210,16 +239,27 @@ export default function SequentialBoothAutoDownloadPanel() {
           <div className="font-semibold mt-1">{boothRangeTotals.failed}</div>
         </div>
         <div className="rounded-lg border border-ink-500/40 bg-ink-900/50 p-3">
-          <div className="text-slate-400 text-xs">Skipped</div>
-          <div className="font-semibold mt-1">{boothRangeTotals.skipped}</div>
+          <div className="text-slate-400 text-xs">Pending</div>
+          <div className="font-semibold mt-1">{boothRangeTotals.pending}</div>
+        </div>
+        <div className="rounded-lg border border-ink-500/40 bg-ink-900/50 p-3">
+          <div className="text-slate-400 text-xs">Max parallel</div>
+          <div className="font-semibold mt-1">
+            {headerMeta.activeDispatchParallel}/
+            {headerMeta.configuredMaxParallel}
+          </div>
         </div>
         <div className="rounded-lg border border-ink-500/40 bg-ink-900/50 p-3">
           <div className="text-slate-400 text-xs">Current booth</div>
           <div className="font-semibold mt-1">{currentBoothLabel}</div>
         </div>
         <div className="rounded-lg border border-ink-500/40 bg-ink-900/50 p-3">
-          <div className="text-slate-400 text-xs">Next booth ETA</div>
-          <div className="font-semibold mt-1">{nextBoothEtaLabel}</div>
+          <div className="text-slate-400 text-xs">Skipped</div>
+          <div className="font-semibold mt-1">{boothRangeTotals.skipped}</div>
+        </div>
+        <div className="rounded-lg border border-ink-500/40 bg-ink-900/50 p-3">
+          <div className="text-slate-400 text-xs">Dispatch hold ETA</div>
+          <div className="font-semibold mt-1">{dispatchHoldEtaLabel}</div>
         </div>
       </div>
 
@@ -228,7 +268,11 @@ export default function SequentialBoothAutoDownloadPanel() {
           type="button"
           className="btn btn-secondary"
           onClick={pauseAutoDownload}
-          disabled={!boothRangeState.isRunning || boothRangeState.isPaused}
+          disabled={
+            !boothRangeState.isRunning ||
+            boothRangeState.isPaused ||
+            boothRangeState.isStopping
+          }
         >
           Pause
         </button>
@@ -236,7 +280,11 @@ export default function SequentialBoothAutoDownloadPanel() {
           type="button"
           className="btn btn-secondary"
           onClick={resumeAutoDownload}
-          disabled={!boothRangeState.isRunning || !boothRangeState.isPaused}
+          disabled={
+            !boothRangeState.isRunning ||
+            !boothRangeState.isPaused ||
+            boothRangeState.isStopping
+          }
         >
           Resume
         </button>
@@ -244,7 +292,7 @@ export default function SequentialBoothAutoDownloadPanel() {
           type="button"
           className="btn btn-secondary"
           onClick={stopAutoDownload}
-          disabled={!boothRangeState.isRunning}
+          disabled={!boothRangeState.isRunning || boothRangeState.isStopping}
         >
           Stop
         </button>
@@ -280,6 +328,7 @@ export default function SequentialBoothAutoDownloadPanel() {
                   <th className="py-2 pr-3">Booth</th>
                   <th className="py-2 pr-3">Session ID</th>
                   <th className="py-2 pr-3">Job ID</th>
+                  <th className="py-2 pr-3">Queue Pos</th>
                   <th className="py-2 pr-3">Attempts</th>
                   <th className="py-2 pr-3">Status</th>
                   <th className="py-2 pr-3">Status Text</th>
@@ -300,6 +349,9 @@ export default function SequentialBoothAutoDownloadPanel() {
                     </td>
                     <td className="py-2 pr-3 font-mono text-xs text-slate-300 break-all">
                       {item.jobId || "-"}
+                    </td>
+                    <td className="py-2 pr-3 text-slate-200">
+                      {item.queuePosition ?? "-"}
                     </td>
                     <td className="py-2 pr-3 text-slate-200">
                       {item.attempts}
