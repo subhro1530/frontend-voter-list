@@ -128,6 +128,12 @@ export default function Layout({ children, fullWidth = false }) {
                           {t("Sessions")}
                         </NavLink>
                         <NavLink
+                          href="/specific-voter-slip"
+                          tooltip="Generate voter slips only for OCRed snippet voters"
+                        >
+                          {t("Specific Voter Slip")}
+                        </NavLink>
+                        <NavLink
                           href="/sessions/auto-download"
                           tooltip="Run sequential booth range voter-slip downloads"
                         >
@@ -272,6 +278,12 @@ export default function Layout({ children, fullWidth = false }) {
                           tooltip="Search for voters by name, ID, or address"
                         >
                           {t("Search Voters")}
+                        </NavLink>
+                        <NavLink
+                          href="/specific-voter-slip"
+                          tooltip="Generate slips for only pasted/uploaded snippet voters"
+                        >
+                          {t("Specific Voter Slip")}
                         </NavLink>
                         <NavLink
                           href="/agent"
@@ -508,6 +520,9 @@ export default function Layout({ children, fullWidth = false }) {
                       <MobileNavLink href="/sessions">
                         {t("Sessions")}
                       </MobileNavLink>
+                      <MobileNavLink href="/specific-voter-slip">
+                        {t("Specific Voter Slip")}
+                      </MobileNavLink>
                       <MobileNavLink href="/sessions/auto-download">
                         {t("Auto Download")}
                       </MobileNavLink>
@@ -541,6 +556,9 @@ export default function Layout({ children, fullWidth = false }) {
                     <>
                       <MobileNavLink href="/search">
                         {t("Search Voters")}
+                      </MobileNavLink>
+                      <MobileNavLink href="/specific-voter-slip">
+                        {t("Specific Voter Slip")}
                       </MobileNavLink>
                       <MobileNavLink href="/agent">{t("Agent")}</MobileNavLink>
                     </>

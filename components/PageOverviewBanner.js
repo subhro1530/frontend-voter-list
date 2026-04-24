@@ -38,6 +38,12 @@ const PAGE_OVERVIEW_CONFIG = {
       "Generate and download booth voter slips sequentially with pause, resume, and retry controls.",
     image: "/page-overviews/sessions/index-overview.png",
   },
+  "/specific-voter-slip": {
+    title: "Specific Voter Slip Generator",
+    summary:
+      "Upload or paste voter snippets, extract missed voters with OCR, and generate one session-scoped PDF.",
+    image: "/page-overviews/search-overview.png",
+  },
   "/profile": {
     title: "User Profile",
     summary:
